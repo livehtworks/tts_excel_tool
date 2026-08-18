@@ -17,4 +17,24 @@ models/
     ...
 ```
 
-`model.json` 的正式 schema 在 P4/P8 固化。UI 通过 ModelRegistry 扫描 metadata 构造语言/Voice 下拉。
+Sherpa `model.json` schema:
+
+```json
+{
+  "id": "vits-piper-en_US-amy-low",
+  "display_name": "English US Amy Low",
+  "engine_id": "sherpa-vits",
+  "language_code": "en-US",
+  "model": "en_US-amy-low.onnx",
+  "tokens": "tokens.txt",
+  "data_dir": "espeak-ng-data",
+  "lexicon": "",
+  "rule_fsts": "",
+  "speaker_id": 0,
+  "num_threads": 2
+}
+```
+
+Paths are relative to the voice directory unless absolute. `model` and `tokens` are required. `data_dir`, `lexicon`, and `rule_fsts` are optional but must exist when provided.
+
+UI and TTS services must use `ModelRegistry`; language/voice paths must not be hardcoded in UI code.

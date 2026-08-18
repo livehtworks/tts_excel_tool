@@ -24,7 +24,8 @@ Status: P1 dependency baseline verified for current Windows machine.
 | nlohmann-json | 3.12.0#2 | Installed and linked through `adayo_persistence` |
 | openxlsx | 0.5.1 | Installed and linked through `adayo_excel_reader` |
 | libxlsxwriter | 1.2.4#1 | Installed; adapter not enabled yet |
-| miniaudio | 0.11.25 | Installed; adapter not enabled yet |
+| miniaudio | 0.11.25 | Installed and linked through `adayo_audio_adapter` |
+| sherpa-onnx | v1.13.6 | Official Windows x64 shared MD Release native package linked |
 
 Archive SHA256 details are recorded in:
 
@@ -48,7 +49,16 @@ App-local DLL smoke includes wxWidgets and utf8proc DLLs copied beside the EXE.
 
 ## Native TTS Dependency
 
-`sherpa-onnx` is intentionally not locked here yet. It requires a separate Windows native C API package/build and repeated synthesis stability acceptance in P4.
+## Native TTS Dependency
+
+| Item | Value |
+|---|---|
+| Package | `sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib.tar.bz2` |
+| SHA256 | `DCA033829D3A7E74C127FC0D349A12257FB890FE5038A381AB1706E4B35CF0FA` |
+| Local root | `D:/programsoft/tools/sherpa-onnx/sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib` |
+| Header SHA256 | `426DB2C6ACFB51E02143AECE67C45779FAE699D961C7C26CCF6F1388FDEAA2DF` |
+
+P4 native TTS verification passed with English and Chinese models.
 
 ## Download Policy Notes
 

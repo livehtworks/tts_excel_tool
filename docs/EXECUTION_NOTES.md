@@ -48,3 +48,5 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 
 - `hf-mirror.com` is usable for sherpa/Piper model files without the local proxy.
 - Plain old Piper `.onnx + .json` files are not enough for the current sherpa adapter; converted models also need `tokens.txt` and `espeak-ng-data`.
+- The local huayan x_low Chinese model failed native sherpa generation because Chinese lexicon/FST resources were missing.
+- The accepted Chinese P4 model is official `vits-piper-zh_CN-xiao_ya-medium-int8`, downloaded without process proxy variables.

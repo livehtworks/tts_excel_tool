@@ -18,6 +18,7 @@ option(ADAYO_WITH_MINIAUDIO "Enable miniaudio playback adapter" OFF)
 option(ADAYO_WITH_OPENXLSX "Enable OpenXLSX workbook reader" OFF)
 option(ADAYO_WITH_LIBXLSXWRITER "Enable libxlsxwriter exporter" OFF)
 option(ADAYO_WITH_JSON_CONFIG "Enable nlohmann-json config store" OFF)
+set(ADAYO_SHERPA_ONNX_ROOT "" CACHE PATH "Root directory of a pinned sherpa-onnx native package")
 
 add_library(adayo_core STATIC
     src/core/unicode/Utf8.cpp
@@ -30,6 +31,7 @@ add_library(adayo_core STATIC
     src/core/worker/WorkerQueue.cpp
     src/services/CompareService.cpp
     src/services/CorpusViewService.cpp
+    src/services/PlaybackService.cpp
     src/services/TtsService.cpp
     src/services/WorkbookService.cpp
 )
@@ -54,17 +56,30 @@ if(ADAYO_WITH_UTF8PROC)
 endif()
 
 if(ADAYO_WITH_SHERPA_ONNX)
+    if(NOT ADAYO_SHERPA_ONNX_ROOT)
+        message(FATAL_ERROR "ADAYO_WITH_SHERPA_ONNX requires ADAYO_SHERPA_ONNX_ROOT")
+    endif()
+    set(ADAYO_SHERPA_ONNX_INCLUDE_DIR "${ADAYO_SHERPA_ONNX_ROOT}/include")
+    set(ADAYO_SHERPA_ONNX_LIB_DIR "${ADAYO_SHERPA_ONNX_ROOT}/lib")
+    set(ADAYO_SHERPA_ONNX_IMPORT_LIB "${ADAYO_SHERPA_ONNX_LIB_DIR}/sherpa-onnx-c-api.lib")
+    if(NOT EXISTS "${ADAYO_SHERPA_ONNX_INCLUDE_DIR}/sherpa-onnx/c-api/c-api.h")
+        message(FATAL_ERROR "Missing sherpa-onnx c-api.h under ${ADAYO_SHERPA_ONNX_INCLUDE_DIR}")
+    endif()
+    if(NOT EXISTS "${ADAYO_SHERPA_ONNX_IMPORT_LIB}")
+        message(FATAL_ERROR "Missing sherpa-onnx import lib: ${ADAYO_SHERPA_ONNX_IMPORT_LIB}")
+    endif()
     add_library(adayo_sherpa_adapter STATIC src/adapters/tts/SherpaOnnxTtsEngine.cpp)
     target_include_directories(adayo_sherpa_adapter PUBLIC src)
-    target_link_libraries(adayo_sherpa_adapter PUBLIC adayo_core)
+    target_include_directories(adayo_sherpa_adapter PRIVATE "${ADAYO_SHERPA_ONNX_INCLUDE_DIR}")
+    target_link_libraries(adayo_sherpa_adapter PUBLIC adayo_core "${ADAYO_SHERPA_ONNX_IMPORT_LIB}")
     target_compile_definitions(adayo_sherpa_adapter PUBLIC ADAYO_HAS_SHERPA_ONNX=1)
-    # Intentionally not guessing sherpa-onnx target names here.
-    # CODEX_EXECUTION_PLAN.md requires pinning the tested Windows package/binary and linking it explicitly.
 endif()
 
 if(ADAYO_WITH_MINIAUDIO)
+    find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h" REQUIRED)
     add_library(adayo_audio_adapter STATIC src/adapters/audio/MiniaudioPlayer.cpp)
     target_include_directories(adayo_audio_adapter PUBLIC src)
+    target_include_directories(adayo_audio_adapter PRIVATE ${MINIAUDIO_INCLUDE_DIRS})
     target_link_libraries(adayo_audio_adapter PUBLIC adayo_core)
     target_compile_definitions(adayo_audio_adapter PUBLIC ADAYO_HAS_MINIAUDIO=1)
 endif()
@@ -79,7 +94,10 @@ endif()
 
 if(ADAYO_WITH_JSON_CONFIG)
     find_package(nlohmann_json CONFIG REQUIRED)
-    add_library(adayo_persistence STATIC src/persistence/JsonConfigStore.cpp)
+    add_library(adayo_persistence STATIC
+        src/persistence/JsonConfigStore.cpp
+        src/services/ModelRegistry.cpp
+    )
     target_include_directories(adayo_persistence PUBLIC src)
     target_link_libraries(adayo_persistence PUBLIC adayo_core nlohmann_json::nlohmann_json)
     target_compile_definitions(adayo_persistence PUBLIC ADAYO_HAS_JSON_CONFIG=1)
@@ -113,6 +131,15 @@ if(ADAYO_BUILD_DESKTOP)
     if(ADAYO_WITH_JSON_CONFIG)
         target_link_libraries(AdayoCorpusTool PRIVATE adayo_persistence)
     endif()
+    if(ADAYO_WITH_SHERPA_ONNX)
+        target_link_libraries(AdayoCorpusTool PRIVATE adayo_sherpa_adapter)
+        add_custom_command(TARGET AdayoCorpusTool POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${ADAYO_SHERPA_ONNX_LIB_DIR}/sherpa-onnx-c-api.dll"
+                "${ADAYO_SHERPA_ONNX_LIB_DIR}/onnxruntime.dll"
+                "${ADAYO_SHERPA_ONNX_LIB_DIR}/onnxruntime_providers_shared.dll"
+                "$<TARGET_FILE_DIR:AdayoCorpusTool>")
+    endif()
 endif()
 
 if(ADAYO_BUILD_TESTS)
@@ -121,11 +148,29 @@ if(ADAYO_BUILD_TESTS)
     target_link_libraries(adayo_core_tests PRIVATE adayo_core)
     add_test(NAME adayo_core_tests COMMAND adayo_core_tests)
 
+    add_executable(adayo_p5_playback_tests tests/p5_playback_tests.cpp)
+    target_link_libraries(adayo_p5_playback_tests PRIVATE adayo_core)
+    add_test(NAME adayo_p5_playback_tests COMMAND adayo_p5_playback_tests)
+
     if(ADAYO_WITH_OPENXLSX AND ADAYO_WITH_JSON_CONFIG)
         add_executable(adayo_p2_tests tests/p2_workbook_tests.cpp)
         target_link_libraries(adayo_p2_tests PRIVATE adayo_core adayo_excel_reader adayo_persistence)
         target_compile_definitions(adayo_p2_tests PRIVATE
             ADAYO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
         add_test(NAME adayo_p2_tests COMMAND adayo_p2_tests)
+    endif()
+
+    if(ADAYO_WITH_SHERPA_ONNX AND ADAYO_WITH_JSON_CONFIG)
+        add_executable(adayo_p4_tts_tests tests/p4_tts_tests.cpp)
+        target_link_libraries(adayo_p4_tts_tests PRIVATE adayo_core adayo_persistence adayo_sherpa_adapter)
+        target_compile_definitions(adayo_p4_tts_tests PRIVATE
+            ADAYO_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models")
+        add_custom_command(TARGET adayo_p4_tts_tests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${ADAYO_SHERPA_ONNX_LIB_DIR}/sherpa-onnx-c-api.dll"
+                "${ADAYO_SHERPA_ONNX_LIB_DIR}/onnxruntime.dll"
+                "${ADAYO_SHERPA_ONNX_LIB_DIR}/onnxruntime_providers_shared.dll"
+                "$<TARGET_FILE_DIR:adayo_p4_tts_tests>")
+        add_test(NAME adayo_p4_tts_tests COMMAND adayo_p4_tts_tests)
     endif()
 endif()

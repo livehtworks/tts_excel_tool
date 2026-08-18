@@ -1,6 +1,6 @@
 # Project Status
 
-Current phase: P3 corpus UI verified.
+Current phase: P5 native TTS and playback service verified.
 
 ## Current Architecture
 
@@ -30,6 +30,11 @@ Current phase: P3 corpus UI verified.
 - `WorkbookService` analyzes workbooks and restores mappings by workbook identity + sheet + header row.
 - `CorpusViewService` owns runtime sessions, display edits, and result cycling.
 - wxWidgets corpus UI now has separate mapping and runtime view panels.
+- sherpa-onnx v1.13.6 native C API is linked in the release preset.
+- `ModelRegistry` scans local `models/sherpa/*/model.json` metadata.
+- English and Chinese sherpa/Piper voices generated through native API.
+- `PlaybackService` implements the playback state machine on `WorkerQueue`.
+- `MiniaudioPlayer` consumes float PCM `AudioBuffer` directly.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
 - Downloaded local candidate sherpa/Piper models:
   - `models/sherpa/vits-piper-en_US-amy-low`
@@ -37,14 +42,11 @@ Current phase: P3 corpus UI verified.
 
 ## Active Work
 
-- Move next to P4/P5 native TTS and playback integration.
+- Move next to P6 compare UI/performance and P7 Excel export verification.
 - Keep sherpa-onnx as a separate pinned native dependency before enabling real TTS.
 
 ## Not Yet Complete
 
-- UI audio controls are not yet wired to playback/TTS.
+- UI audio controls are not fully wired to `PlaybackService` buttons yet.
 - libxlsxwriter exporter is not fully wired to a pinned package.
-- sherpa-onnx native TTS is not verified.
-- Local TTS model files exist, but model registry schema and sherpa native runtime are not wired yet.
-- miniaudio playback is still a placeholder.
-- No production model package has been downloaded or accepted yet.
+- MOSS-TTS-Nano native adapter is not implemented.

@@ -30,11 +30,12 @@
         "ADAYO_BUILD_TESTS": "ON",
         "ADAYO_WITH_RAPIDFUZZ": "ON",
         "ADAYO_WITH_UTF8PROC": "ON",
-        "ADAYO_WITH_MINIAUDIO": "OFF",
+        "ADAYO_WITH_MINIAUDIO": "ON",
         "ADAYO_WITH_OPENXLSX": "ON",
         "ADAYO_WITH_LIBXLSXWRITER": "OFF",
         "ADAYO_WITH_JSON_CONFIG": "ON",
-        "ADAYO_WITH_SHERPA_ONNX": "OFF"
+        "ADAYO_WITH_SHERPA_ONNX": "ON",
+        "ADAYO_SHERPA_ONNX_ROOT": "D:/programsoft/tools/sherpa-onnx/sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib"
       }
     }
   ],

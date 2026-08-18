@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <stdexcept>
 
 #ifdef ADAYO_HAS_SHERPA_ONNX
@@ -32,6 +33,18 @@ void SherpaOnnxTtsEngine::Load(const TtsModelConfig& config) {
     Unload();
     impl_->config = config;
 #ifdef ADAYO_HAS_SHERPA_ONNX
+    for (const auto& [path, label] : {
+             std::pair{impl_->config.model_path, "model"},
+             std::pair{impl_->config.tokens_path, "tokens"},
+         }) {
+        if (path.empty() || !std::filesystem::exists(path)) {
+            throw std::runtime_error("sherpa-onnx 模型缺失 " + std::string(label) + ": " + path);
+        }
+    }
+    if (!impl_->config.data_dir.empty() && !std::filesystem::exists(impl_->config.data_dir)) {
+        throw std::runtime_error("sherpa-onnx 模型缺失 data_dir: " + impl_->config.data_dir);
+    }
+
     SherpaOnnxOfflineTtsConfig c{};
     c.model.vits.model = impl_->config.model_path.c_str();
     c.model.vits.tokens = impl_->config.tokens_path.c_str();
@@ -41,8 +54,11 @@ void SherpaOnnxTtsEngine::Load(const TtsModelConfig& config) {
     c.model.vits.noise_scale_w = 0.8f;
     c.model.vits.length_scale = 1.0f;
     c.model.num_threads = std::max<std::int32_t>(1, impl_->config.num_threads);
+    c.model.provider = "cpu";
     c.model.debug = 0;
     c.rule_fsts = impl_->config.rule_fsts.empty() ? nullptr : impl_->config.rule_fsts.c_str();
+    c.max_num_sentences = 2;
+    c.silence_scale = 0.2f;
 
     impl_->tts = SherpaOnnxCreateOfflineTts(&c);
     if (!impl_->tts) throw std::runtime_error("SherpaOnnxCreateOfflineTts 失败");
