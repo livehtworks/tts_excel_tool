@@ -20,6 +20,9 @@ Current phase: P1 Windows build and dependency baseline.
 - `windows-core` CMake preset builds and tests successfully.
 - vcpkg manifest dry-run resolves dependencies with wxWidgets locked to 3.2.8.1.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
+- Downloaded local candidate sherpa/Piper models:
+  - `models/sherpa/vits-piper-en_US-amy-low`
+  - `models/sherpa/vits-piper-zh_CN-huayan-x_low`
 
 ## Active Work
 
@@ -35,5 +38,6 @@ Current phase: P1 Windows build and dependency baseline.
 - OpenXLSX reader is not implemented.
 - libxlsxwriter exporter is not fully wired to a pinned package.
 - sherpa-onnx native TTS is not verified.
+- Local TTS model files exist, but model registry schema and sherpa native runtime are not wired yet.
 - miniaudio playback is still a placeholder.
 - No production model package has been downloaded or accepted yet.
