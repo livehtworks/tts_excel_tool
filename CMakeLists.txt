@@ -146,6 +146,9 @@ if(ADAYO_BUILD_DESKTOP)
                 "${ADAYO_SHERPA_ONNX_LIB_DIR}/onnxruntime_providers_shared.dll"
                 "$<TARGET_FILE_DIR:AdayoCorpusTool>")
     endif()
+    if(ADAYO_WITH_MINIAUDIO)
+        target_link_libraries(AdayoCorpusTool PRIVATE adayo_audio_adapter)
+    endif()
     if(ADAYO_WITH_LIBXLSXWRITER)
         target_link_libraries(AdayoCorpusTool PRIVATE adayo_excel_writer)
         add_custom_command(TARGET AdayoCorpusTool POST_BUILD

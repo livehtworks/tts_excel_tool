@@ -45,6 +45,9 @@ Current phase: P9 acceptance revoked pending remediation R0-R6.
 - R0 replaced Release-unsafe `assert()` tests with always-on test checks and exposed the R1-1 `ENG结果` column classification failure.
 - R1 fixed result-column recognition, default mapping roles, `tts_model_id` persistence, schema v2 language override semantics, path-only workbook identity, sheet/header row storage, and model registry diagnostics.
 - R2 fixed runtime result identity, synthetic blank editing/result rejection, and avoided full rebuilds for ordinary result cycles and non-structural edits.
+- R3 wired the runtime UI to the real playback chain: selected play column, row range, interval, speed, pause/resume/stop, single-cell double-click playback, model-id loading, and current-cell highlighting.
+- R3 fixed pause during generation, interruptible intervals, stale worker stop/new-sequence state ownership, and miniaudio same-format device reuse.
+- R3 re-ran sherpa acceptance under always-on checks: speed sample-count ordering, 20 EN/ZH model switches, 500 English generations, and 500 Chinese generations.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
 - Downloaded local candidate sherpa/Piper models:
   - `models/sherpa/vits-piper-en_US-amy-low`
@@ -52,11 +55,10 @@ Current phase: P9 acceptance revoked pending remediation R0-R6.
 
 ## Active Work
 
-- Execute remediation checklist R0-R6 in order; R3 is next.
+- Execute remediation checklist R0-R6 in order; R4 is next.
 
 ## Not Yet Complete
 
-- UI audio controls are not fully wired to `PlaybackService` buttons yet.
 - R0-R6 remediation is not yet complete.
 - Full P9 target-machine acceptance is not yet complete.
 - MOSS-TTS-Nano native adapter is intentionally blocked from runtime enablement.

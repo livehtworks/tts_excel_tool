@@ -17,6 +17,8 @@ struct MiniaudioPlayer::Impl {
 #ifdef ADAYO_HAS_MINIAUDIO
     ma_device device{};
     bool device_initialized{false};
+    std::int32_t device_sample_rate{};
+    std::int32_t device_channels{};
 #endif
     std::mutex mutex;
     std::condition_variable cv;
@@ -52,6 +54,38 @@ void DataCallback(ma_device* device, void* output, const void*, ma_uint32 frame_
         impl->cv.notify_all();
     }
 }
+
+void UninitDevice(MiniaudioPlayer::Impl& impl) {
+    if (!impl.device_initialized) return;
+    ma_device_uninit(&impl.device);
+    impl.device_initialized = false;
+    impl.device_sample_rate = 0;
+    impl.device_channels = 0;
+}
+
+void EnsureDevice(MiniaudioPlayer::Impl& impl, std::int32_t sample_rate, std::int32_t channels) {
+    if (impl.device_initialized &&
+        impl.device_sample_rate == sample_rate &&
+        impl.device_channels == channels) {
+        return;
+    }
+    UninitDevice(impl);
+
+    ma_device_config config = ma_device_config_init(ma_device_type_playback);
+    config.playback.format = ma_format_f32;
+    config.playback.channels = static_cast<ma_uint32>(channels);
+    config.sampleRate = static_cast<ma_uint32>(sample_rate);
+    config.dataCallback = DataCallback;
+    config.pUserData = &impl;
+
+    const auto init_result = ma_device_init(nullptr, &config, &impl.device);
+    if (init_result != MA_SUCCESS) {
+        throw std::runtime_error("miniaudio device 初始化失败");
+    }
+    impl.device_initialized = true;
+    impl.device_sample_rate = sample_rate;
+    impl.device_channels = channels;
+}
 } // namespace
 #endif
 
@@ -60,8 +94,7 @@ MiniaudioPlayer::~MiniaudioPlayer() {
     Stop();
 #ifdef ADAYO_HAS_MINIAUDIO
     if (impl_->device_initialized) {
-        ma_device_uninit(&impl_->device);
-        impl_->device_initialized = false;
+        UninitDevice(*impl_);
     }
 #endif
 }
@@ -74,6 +107,7 @@ void MiniaudioPlayer::Play(const AudioBuffer& audio) {
     }
 
     Stop();
+    EnsureDevice(*impl_, audio.sample_rate, audio.channels);
     {
         std::lock_guard lock(impl_->mutex);
         impl_->samples = audio.samples;
@@ -84,26 +118,11 @@ void MiniaudioPlayer::Play(const AudioBuffer& audio) {
         impl_->stop_requested = false;
     }
 
-    ma_device_config config = ma_device_config_init(ma_device_type_playback);
-    config.playback.format = ma_format_f32;
-    config.playback.channels = static_cast<ma_uint32>(audio.channels);
-    config.sampleRate = static_cast<ma_uint32>(audio.sample_rate);
-    config.dataCallback = DataCallback;
-    config.pUserData = impl_.get();
-
-    if (impl_->device_initialized) {
-        ma_device_uninit(&impl_->device);
-        impl_->device_initialized = false;
-    }
-    const auto init_result = ma_device_init(nullptr, &config, &impl_->device);
-    if (init_result != MA_SUCCESS) {
-        throw std::runtime_error("miniaudio device 初始化失败");
-    }
-    impl_->device_initialized = true;
     const auto start_result = ma_device_start(&impl_->device);
     if (start_result != MA_SUCCESS) {
-        ma_device_uninit(&impl_->device);
-        impl_->device_initialized = false;
+        std::lock_guard lock(impl_->mutex);
+        impl_->playing = false;
+        impl_->stop_requested = true;
         throw std::runtime_error("miniaudio device 启动失败");
     }
 

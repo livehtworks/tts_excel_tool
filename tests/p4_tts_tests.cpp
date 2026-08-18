@@ -44,9 +44,14 @@ void TestSherpaSmokeAndSwitching() {
 
     std::cout << "P4 smoke: English speeds\n" << std::flush;
     service.LoadModel(en.config);
-    for (double speed : {0.5, 1.0, 2.0}) {
-        RequireUsableAudio(service.Synthesize({"Hello from Adayo corpus tool.", en.config.language_code, 0, speed}));
-    }
+    const auto slow = service.Synthesize({"Hello from Adayo corpus tool.", en.config.language_code, 0, 0.5});
+    const auto normal = service.Synthesize({"Hello from Adayo corpus tool.", en.config.language_code, 0, 1.0});
+    const auto fast = service.Synthesize({"Hello from Adayo corpus tool.", en.config.language_code, 0, 2.0});
+    RequireUsableAudio(slow);
+    RequireUsableAudio(normal);
+    RequireUsableAudio(fast);
+    REQUIRE(slow.samples.size() > normal.samples.size());
+    REQUIRE(normal.samples.size() > fast.samples.size());
 
     std::cout << "P4 smoke: Chinese\n" << std::flush;
     service.LoadModel(zh.config);
@@ -66,6 +71,7 @@ void TestSherpaRepeatedGeneration() {
     ModelRegistry registry(std::filesystem::path(ADAYO_MODELS_DIR) / "sherpa");
     const auto entries = registry.ScanSherpaModels();
     const auto& en = FindLanguage(entries, "en-US");
+    const auto& zh = FindId(entries, "vits-piper-zh_CN-xiao_ya-medium-int8");
     TtsService service;
     service.SetEngine(std::make_unique<SherpaOnnxTtsEngine>());
     service.LoadModel(en.config);
@@ -79,6 +85,18 @@ void TestSherpaRepeatedGeneration() {
     }
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
     std::cout << "500 English sherpa generations elapsed_ms=" << elapsed << "\n";
+
+    std::cout << "P4 stress: 500 Chinese\n" << std::flush;
+    service.LoadModel(zh.config);
+    const auto zh_start = std::chrono::steady_clock::now();
+    for (int i = 0; i < 500; ++i) {
+        RequireUsableAudio(service.Synthesize({"短句稳定性测试", zh.config.language_code, 0, 1.0}));
+        if ((i + 1) % 50 == 0) {
+            std::cout << "generated_zh=" << (i + 1) << "\n" << std::flush;
+        }
+    }
+    const auto zh_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - zh_start).count();
+    std::cout << "500 Chinese sherpa generations elapsed_ms=" << zh_elapsed << "\n";
 }
 } // namespace
 

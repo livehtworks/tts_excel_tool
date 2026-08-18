@@ -1,7 +1,5 @@
 #include "services/PlaybackService.h"
 
-#include <thread>
-
 namespace adayo {
 
 PlaybackService::PlaybackService(TtsService& tts, IAudioPlayer& player)
@@ -28,19 +26,28 @@ void PlaybackService::PlaySequence(std::vector<PlaybackItem> items, std::chrono:
 }
 
 void PlaybackService::Pause() {
-    player_.Pause();
     std::lock_guard lock(mutex_);
     if (state_ == PlaybackState::Playing || state_ == PlaybackState::Generating) {
+        pause_requested_ = true;
+        paused_from_ = state_;
         state_ = PlaybackState::Paused;
+        if (paused_from_ == PlaybackState::Playing) {
+            player_.Pause();
+        }
     }
     cv_.notify_all();
 }
 
 void PlaybackService::Resume() {
-    player_.Resume();
     std::lock_guard lock(mutex_);
     if (state_ == PlaybackState::Paused) {
-        state_ = PlaybackState::Playing;
+        pause_requested_ = false;
+        const auto resume_to = paused_from_ == PlaybackState::Generating ? PlaybackState::Generating : PlaybackState::Playing;
+        state_ = resume_to;
+        paused_from_ = PlaybackState::Idle;
+        if (resume_to == PlaybackState::Playing) {
+            player_.Resume();
+        }
     }
     cv_.notify_all();
 }
@@ -49,12 +56,14 @@ void PlaybackService::Stop() {
     generation_.fetch_add(1);
     {
         std::lock_guard lock(mutex_);
+        pause_requested_ = false;
+        paused_from_ = PlaybackState::Idle;
         if (state_ != PlaybackState::Idle) {
             state_ = PlaybackState::Stopping;
         }
     }
     player_.Stop();
-    SetState(PlaybackState::Idle);
+    cv_.notify_all();
 }
 
 PlaybackState PlaybackService::State() const {
@@ -88,6 +97,10 @@ void PlaybackService::SetState(PlaybackState state) {
     {
         std::lock_guard lock(mutex_);
         state_ = state;
+        if (state != PlaybackState::Paused) {
+            pause_requested_ = false;
+            paused_from_ = PlaybackState::Idle;
+        }
         if (state != PlaybackState::Error) {
             last_error_.clear();
         }
@@ -107,11 +120,7 @@ void PlaybackService::SetError(std::string error) {
 void PlaybackService::RunSequence(std::vector<PlaybackItem> items, std::chrono::milliseconds interval, std::uint64_t generation) {
     try {
         for (std::size_t i = 0; i < items.size(); ++i) {
-            if (generation_.load() != generation) return;
             const auto& item = items[i];
-            if (item.request.text.empty()) {
-                continue;
-            }
             {
                 std::lock_guard lock(mutex_);
                 current_row_ = item.row_index;
@@ -119,14 +128,30 @@ void PlaybackService::RunSequence(std::vector<PlaybackItem> items, std::chrono::
                 state_ = PlaybackState::Generating;
             }
             cv_.notify_all();
+            if (IsCanceled(generation)) {
+                FinishCanceledIfCurrentStop(generation);
+                return;
+            }
+            if (!WaitWhilePaused(generation)) return;
+            if (item.request.text.empty()) {
+                if (i + 1 < items.size() && !WaitInterval(interval, generation)) return;
+                continue;
+            }
 
             auto audio = tts_.Synthesize(item.request);
-            if (generation_.load() != generation) return;
+            if (IsCanceled(generation)) {
+                FinishCanceledIfCurrentStop(generation);
+                return;
+            }
+            if (!WaitWhilePaused(generation)) return;
             SetState(PlaybackState::Playing);
             player_.Play(audio);
-            if (generation_.load() != generation) return;
+            if (IsCanceled(generation)) {
+                FinishCanceledIfCurrentStop(generation);
+                return;
+            }
             if (i + 1 < items.size() && interval.count() > 0) {
-                std::this_thread::sleep_for(interval);
+                if (!WaitInterval(interval, generation)) return;
             }
         }
         if (generation_.load() == generation) {
@@ -141,6 +166,59 @@ void PlaybackService::RunSequence(std::vector<PlaybackItem> items, std::chrono::
             SetError("未知播放错误");
         }
     }
+}
+
+bool PlaybackService::IsCanceled(std::uint64_t generation) const {
+    return generation_.load() != generation;
+}
+
+bool PlaybackService::WaitWhilePaused(std::uint64_t generation) {
+    std::unique_lock lock(mutex_);
+    cv_.wait(lock, [&] {
+        return generation_.load() != generation || !pause_requested_;
+    });
+    if (generation_.load() != generation) {
+        const bool should_finish = state_ == PlaybackState::Stopping && generation_.load() == generation + 1;
+        if (should_finish) {
+            state_ = PlaybackState::Idle;
+        }
+        lock.unlock();
+        cv_.notify_all();
+        return false;
+    }
+    return true;
+}
+
+void PlaybackService::FinishCanceledIfCurrentStop(std::uint64_t generation) {
+    {
+        std::lock_guard lock(mutex_);
+        if (state_ == PlaybackState::Stopping && generation_.load() == generation + 1) {
+            state_ = PlaybackState::Idle;
+            pause_requested_ = false;
+            paused_from_ = PlaybackState::Idle;
+        }
+    }
+    cv_.notify_all();
+}
+
+bool PlaybackService::WaitInterval(std::chrono::milliseconds interval, std::uint64_t generation) {
+    if (interval.count() <= 0) return !IsCanceled(generation);
+    std::unique_lock lock(mutex_);
+    const auto woke = cv_.wait_for(lock, interval, [&] {
+        return generation_.load() != generation || pause_requested_;
+    });
+    if (!woke) return true;
+    if (generation_.load() != generation) {
+        const bool should_finish = state_ == PlaybackState::Stopping && generation_.load() == generation + 1;
+        if (should_finish) {
+            state_ = PlaybackState::Idle;
+        }
+        lock.unlock();
+        cv_.notify_all();
+        return false;
+    }
+    lock.unlock();
+    return WaitWhilePaused(generation);
 }
 
 } // namespace adayo

@@ -49,6 +49,10 @@ private:
     void SetState(PlaybackState state);
     void SetError(std::string error);
     void RunSequence(std::vector<PlaybackItem> items, std::chrono::milliseconds interval, std::uint64_t generation);
+    bool IsCanceled(std::uint64_t generation) const;
+    bool WaitWhilePaused(std::uint64_t generation);
+    void FinishCanceledIfCurrentStop(std::uint64_t generation);
+    bool WaitInterval(std::chrono::milliseconds interval, std::uint64_t generation);
 
     TtsService& tts_;
     IAudioPlayer& player_;
@@ -56,10 +60,12 @@ private:
     mutable std::mutex mutex_;
     mutable std::condition_variable cv_;
     PlaybackState state_{PlaybackState::Idle};
+    PlaybackState paused_from_{PlaybackState::Idle};
     std::string last_error_;
     std::size_t current_row_{};
     std::size_t current_column_{};
     std::atomic<std::uint64_t> generation_{0};
+    bool pause_requested_{false};
 };
 
 } // namespace adayo
