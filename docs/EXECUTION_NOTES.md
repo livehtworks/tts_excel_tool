@@ -69,3 +69,9 @@ Copy-Item -Path D:\programsoft\tools\vcpkg\buildtrees\libxlsxwriter\src\v1.2.4-e
   - `D:\programsoft\tools\moss-tts\MOSS-TTS-Nano`
   - `D:\programsoft\tools\moss-tts\MOSS-TTS-Nano-Reader`
 - MOSS ONNX uses multiple coordinated graphs plus manifest metadata and SentencePiece tokenization. Do not enable `MossNanoTtsEngine` until C++ tokenizer parity and golden ONNX output checks exist.
+
+## Packaging
+
+- Use `scripts/package_windows.ps1` after building the `windows-release` preset.
+- The packaging script refuses to overwrite an existing timestamped package directory or ZIP.
+- Packaging copies only accepted sherpa models; failed/candidate model directories remain local development artifacts.

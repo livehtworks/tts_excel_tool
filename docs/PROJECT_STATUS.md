@@ -1,6 +1,6 @@
 # Project Status
 
-Current phase: P8 MOSS assessment blocked by official parity requirements; P9 packaging in progress.
+Current phase: P9 locally accepted; target-machine acceptance pending.
 
 ## Current Architecture
 
@@ -40,6 +40,9 @@ Current phase: P8 MOSS assessment blocked by official parity requirements; P9 pa
 - Runtime and compare Excel export are verified in a Chinese output path.
 - `MossNanoTtsEngine` is compiled as an explicit-fail adapter and covered by `adayo_p8_moss_blocked_tests`.
 - P8 official MOSS ONNX sources were reviewed; status is `MOSS_PORT_BLOCKED` until native tokenizer and golden parity are implemented.
+- `scripts/package_windows.ps1` packages the release app, fixed DLLs, runtime directories, accepted sherpa models, and audit docs without downloading.
+- P9 local release regression passed: `7/7 tests passed`.
+- Independent package smoke start passed from `dist/AdayoCorpusTool-win-x64-20260818-190920`.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
 - Downloaded local candidate sherpa/Piper models:
   - `models/sherpa/vits-piper-en_US-amy-low`
@@ -47,8 +50,7 @@ Current phase: P8 MOSS assessment blocked by official parity requirements; P9 pa
 
 ## Active Work
 
-- Move next to P9 packaging/final acceptance.
-- Keep sherpa-onnx as a separate pinned native dependency before enabling real TTS.
+- Produce final source/release ZIPs after committing P9 packaging changes.
 
 ## Not Yet Complete
 
