@@ -1,0 +1,89 @@
+{
+  "fixture": "adayo_legacy_business_fixture.xlsx",
+  "workbook": {
+    "sheet_names": ["Vehicle", "System", "EmptySheet"]
+  },
+  "vehicle_sheet": {
+    "header_row": 2,
+    "row_count_after_header": 4,
+    "headers": ["序号", "二级功能", "三级功能", "示例Query", "ENG", "ENU", "FRF", "ARG", "SPM", "ENG结果"],
+    "column_expectations": [
+      {
+        "excel_col": "A",
+        "header": "序号",
+        "suggested_type": "unknown",
+        "guessed_language": ""
+      },
+      {
+        "excel_col": "C",
+        "header": "三级功能",
+        "suggested_type": "meta",
+        "guessed_language": ""
+      },
+      {
+        "excel_col": "E",
+        "header": "ENG",
+        "suggested_type": "utterance",
+        "guessed_language": "en-GB",
+        "sample_count": 3
+      },
+      {
+        "excel_col": "F",
+        "header": "ENU",
+        "suggested_type": "utterance",
+        "guessed_language": "en-US",
+        "sample_count": 3
+      },
+      {
+        "excel_col": "G",
+        "header": "FRF",
+        "suggested_type": "utterance",
+        "guessed_language": "fr-FR"
+      },
+      {
+        "excel_col": "H",
+        "header": "ARG",
+        "suggested_type": "utterance",
+        "guessed_language": "ar-SA"
+      },
+      {
+        "excel_col": "I",
+        "header": "SPM",
+        "suggested_type": "utterance",
+        "guessed_language": "es-ES"
+      },
+      {
+        "excel_col": "J",
+        "header": "ENG结果",
+        "suggested_type": "result",
+        "guessed_language": "en-GB"
+      }
+    ],
+    "mapping_scenario": {
+      "reference_columns": ["三级功能"],
+      "play_columns": ["ENG", "ENU"],
+      "invalid_if_reference_count_gt": 1,
+      "invalid_if_play_count_lt": 1
+    },
+    "run_view_expectations": {
+      "headers": ["序号", "三级功能", "ENG", "ENG结果", "ENU", "ENU结果"],
+      "expanded_row_count": 8,
+      "rows": [
+        ["1", "开关控制", "Turn on feature A", "", "Turn on feature A", ""],
+        ["2", "开关控制", "Enable feature A", "", "", ""],
+        ["3", "开关控制", "Turn off feature A", "", "Turn off feature A", ""],
+        ["4", "开关控制", "", "", "Disable feature A", ""],
+        ["5", "数值控制", "Set feature B to one", "", "", ""],
+        ["6", "数值控制", "Feature B one", "", "", ""],
+        ["7", "数值控制", "Apply value one", "", "", ""],
+        ["8", "空单元格验证", "", "", "", ""]
+      ],
+      "result_cycle": ["", "OK", "NG", ""],
+      "edit_scope": "editing one expanded play segment must only update its raw row + source column + segment index"
+    }
+  },
+  "system_sheet": {
+    "header_row": 1,
+    "purpose": "multi-sheet and header-row-1 control sample"
+  }
+}

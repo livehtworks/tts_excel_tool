@@ -1,0 +1,15 @@
+/build/
+/build-*/
+/out/
+.vs/
+.idea/
+*.user
+*.suo
+*.VC.db
+/logs/
+/cache/
+/exports/
+/models/*
+!/models/README.md
+/config/*.json
+/backup/
