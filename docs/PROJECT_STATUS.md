@@ -60,6 +60,7 @@ Current phase: R6 local automation passed; target Windows PC manual acceptance p
 - R5 added `models/package-manifest.json`; packaging copies and validates only listed local sherpa model ids.
 - R6 local automated regression passed on this workstation: `windows-core` 4/4 and `windows-release` 7/7.
 - R6 performance evidence recorded: P6 1000x992 in 258 ms, P6 5000x4990 in 6514 ms, English sherpa 500 avg 64.068 ms p95 79 ms, Chinese sherpa 500 avg 400.938 ms p95 456 ms.
+- R6 release package generated under `dist/AdayoCorpusTool-win-x64-R6-9157b64.zip`; SHA-256 is `C94867626890DC9E6F2D5D1CA6E6BC33BD5BA8CC11A9BBE5C65AC80DB81DE792`.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
 - Downloaded local candidate sherpa/Piper models:
   - `models/sherpa/vits-piper-en_US-amy-low`

@@ -8,7 +8,17 @@ Local automated R6 acceptance passed on the development workstation. Target Wind
 
 ## Commit
 
-The package source commit is generated after this audit checkpoint and recorded in the release package manifest.
+- Package source commit: `9157b64`
+
+## Package
+
+- Package directory: `dist/AdayoCorpusTool-win-x64-R6-9157b64`
+- Package ZIP: `dist/AdayoCorpusTool-win-x64-R6-9157b64.zip`
+- SHA-256: `C94867626890DC9E6F2D5D1CA6E6BC33BD5BA8CC11A9BBE5C65AC80DB81DE792`
+- SHA file: `dist/AdayoCorpusTool-win-x64-R6-9157b64.zip.sha256`
+- Package manifest source commit: `9157b64`
+- Package file count: 419
+- Package byte count: 139885093
 
 ## Automated Verification
 
@@ -45,6 +55,13 @@ The package source commit is generated after this audit checkpoint and recorded 
 ## Target PC Manual Acceptance
 
 Not executed here. The checklist requires validation on a target Windows PC with no VS, no Python, no Node, and no discrete GPU. P9 remains revoked until those manual items pass against the packaged release.
+
+## Local Package Smoke
+
+- Copied package to a temporary Chinese path.
+- Started `AdayoCorpusTool.exe` from that Chinese path.
+- Process stayed alive for the smoke window and was then stopped.
+- Residual process after stop: no.
 
 ## Known Limitations / Blocked
 
