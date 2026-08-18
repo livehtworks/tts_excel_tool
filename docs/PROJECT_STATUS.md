@@ -42,7 +42,7 @@ Current phase: P9 locally accepted; target-machine acceptance pending.
 - P8 official MOSS ONNX sources were reviewed; status is `MOSS_PORT_BLOCKED` until native tokenizer and golden parity are implemented.
 - `scripts/package_windows.ps1` packages the release app, fixed DLLs, runtime directories, accepted sherpa models, and audit docs without downloading.
 - P9 local release regression passed: `7/7 tests passed`.
-- Independent package smoke start passed from `dist/AdayoCorpusTool-win-x64-20260818-190920`.
+- Independent package smoke start passed from a generated P9 package directory.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
 - Downloaded local candidate sherpa/Piper models:
   - `models/sherpa/vits-piper-en_US-amy-low`
@@ -50,7 +50,7 @@ Current phase: P9 locally accepted; target-machine acceptance pending.
 
 ## Active Work
 
-- Produce final source/release ZIPs after committing P9 packaging changes.
+- No active implementation work after final ZIP regeneration.
 
 ## Not Yet Complete
 
