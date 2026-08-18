@@ -1,5 +1,11 @@
 #include "ui/CorpusRunPanel.h"
 
+#include "adapters/excel/LibXlsxWriterExporter.h"
+
+#include <filesystem>
+
+#include <wx/button.h>
+#include <wx/filedlg.h>
 #include <wx/grid.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
@@ -17,8 +23,13 @@ std::string ToUtf8(const wxString& text) {
 
 CorpusRunPanel::CorpusRunPanel(wxWindow* parent) : wxPanel(parent) {
     auto* root = new wxBoxSizer(wxVERTICAL);
+    auto* top = new wxBoxSizer(wxHORIZONTAL);
     status_ = new wxStaticText(this, wxID_ANY, "尚未生成运行视图");
-    root->Add(status_, 0, wxEXPAND | wxALL, 6);
+    auto* export_button = new wxButton(this, wxID_ANY, "导出 Excel");
+    export_button->Bind(wxEVT_BUTTON, &CorpusRunPanel::OnExport, this);
+    top->Add(status_, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    top->Add(export_button, 0);
+    root->Add(top, 0, wxEXPAND | wxALL, 6);
 
     grid_ = new wxGrid(this, wxID_ANY);
     grid_->CreateGrid(0, 0);
@@ -27,6 +38,20 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent) : wxPanel(parent) {
     grid_->Bind(wxEVT_GRID_CELL_LEFT_DCLICK, &CorpusRunPanel::OnCellDClick, this);
     root->Add(grid_, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
     SetSizer(root);
+}
+
+void CorpusRunPanel::OnExport(wxCommandEvent&) {
+    if (!session_) return;
+    wxFileDialog dialog(this, "导出运行视图", "", "runtime.xlsx", "Excel workbook (*.xlsx)|*.xlsx", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+    if (dialog.ShowModal() == wxID_OK) {
+        try {
+            LibXlsxWriterExporter exporter;
+            exporter.ExportRuntimeView(session_->view, std::filesystem::path(dialog.GetPath().ToStdWstring()));
+            status_->SetLabel("运行视图已导出");
+        } catch (const std::exception& ex) {
+            status_->SetLabel(FromUtf8(ex.what()));
+        }
+    }
 }
 
 void CorpusRunPanel::SetSession(CorpusSession session) {

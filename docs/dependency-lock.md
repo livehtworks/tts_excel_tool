@@ -23,7 +23,7 @@ Status: P1 dependency baseline verified for current Windows machine.
 | utf8proc | 2.11.3 | Installed and linked in release preset |
 | nlohmann-json | 3.12.0#2 | Installed and linked through `adayo_persistence` |
 | openxlsx | 0.5.1 | Installed and linked through `adayo_excel_reader` |
-| libxlsxwriter | 1.2.4#1 | Installed; adapter not enabled yet |
+| libxlsxwriter | 1.2.4#1 | Installed and linked through `adayo_excel_writer` |
 | miniaudio | 0.11.25 | Installed and linked through `adayo_audio_adapter` |
 | sherpa-onnx | v1.13.6 | Official Windows x64 shared MD Release native package linked |
 

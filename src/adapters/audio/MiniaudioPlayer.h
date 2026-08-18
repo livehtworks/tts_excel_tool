@@ -7,6 +7,8 @@
 namespace adayo {
 class MiniaudioPlayer final : public IAudioPlayer {
 public:
+    struct Impl;
+
     MiniaudioPlayer();
     ~MiniaudioPlayer() override;
     void Play(const AudioBuffer& audio) override;
@@ -14,7 +16,6 @@ public:
     void Resume() override;
     void Stop() override;
 private:
-    struct Impl;
     std::unique_ptr<Impl> impl_;
 };
 } // namespace adayo

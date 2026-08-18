@@ -1,6 +1,6 @@
 # Project Status
 
-Current phase: P5 native TTS and playback service verified.
+Current phase: P7 compare UI and Excel export verified.
 
 ## Current Architecture
 
@@ -35,6 +35,9 @@ Current phase: P5 native TTS and playback service verified.
 - English and Chinese sherpa/Piper voices generated through native API.
 - `PlaybackService` implements the playback state machine on `WorkerQueue`.
 - `MiniaudioPlayer` consumes float PCM `AudioBuffer` directly.
+- `ComparePanel` imports text files, runs `CompareService`, and displays alignment results.
+- `LibXlsxWriterExporter` is enabled and exports runtime/compare workbooks.
+- Runtime and compare Excel export are verified in a Chinese output path.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
 - Downloaded local candidate sherpa/Piper models:
   - `models/sherpa/vits-piper-en_US-amy-low`
@@ -42,11 +45,11 @@ Current phase: P5 native TTS and playback service verified.
 
 ## Active Work
 
-- Move next to P6 compare UI/performance and P7 Excel export verification.
+- Move next to P8 MOSS-TTS-Nano assessment and P9 packaging/final acceptance.
 - Keep sherpa-onnx as a separate pinned native dependency before enabling real TTS.
 
 ## Not Yet Complete
 
 - UI audio controls are not fully wired to `PlaybackService` buttons yet.
-- libxlsxwriter exporter is not fully wired to a pinned package.
+- Full P9 target-machine acceptance is not yet complete.
 - MOSS-TTS-Nano native adapter is not implemented.

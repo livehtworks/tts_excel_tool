@@ -104,11 +104,13 @@ if(ADAYO_WITH_JSON_CONFIG)
 endif()
 
 if(ADAYO_WITH_LIBXLSXWRITER)
+    find_path(LIBXLSXWRITER_INCLUDE_DIRS "xlsxwriter.h" REQUIRED)
+    find_library(LIBXLSXWRITER_LIBRARY xlsxwriter REQUIRED)
     add_library(adayo_excel_writer STATIC src/adapters/excel/LibXlsxWriterExporter.cpp)
     target_include_directories(adayo_excel_writer PUBLIC src)
-    target_link_libraries(adayo_excel_writer PUBLIC adayo_core)
+    target_include_directories(adayo_excel_writer PRIVATE ${LIBXLSXWRITER_INCLUDE_DIRS})
+    target_link_libraries(adayo_excel_writer PUBLIC adayo_core ${LIBXLSXWRITER_LIBRARY})
     target_compile_definitions(adayo_excel_writer PUBLIC ADAYO_HAS_LIBXLSXWRITER=1)
-    # Target/library name is deliberately resolved in P1 after the Windows dependency baseline is pinned.
 endif()
 
 if(ADAYO_BUILD_DESKTOP)
@@ -140,6 +142,13 @@ if(ADAYO_BUILD_DESKTOP)
                 "${ADAYO_SHERPA_ONNX_LIB_DIR}/onnxruntime_providers_shared.dll"
                 "$<TARGET_FILE_DIR:AdayoCorpusTool>")
     endif()
+    if(ADAYO_WITH_LIBXLSXWRITER)
+        target_link_libraries(AdayoCorpusTool PRIVATE adayo_excel_writer)
+        add_custom_command(TARGET AdayoCorpusTool POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin/xlsxwriter.dll"
+                "$<TARGET_FILE_DIR:AdayoCorpusTool>")
+    endif()
 endif()
 
 if(ADAYO_BUILD_TESTS)
@@ -151,6 +160,24 @@ if(ADAYO_BUILD_TESTS)
     add_executable(adayo_p5_playback_tests tests/p5_playback_tests.cpp)
     target_link_libraries(adayo_p5_playback_tests PRIVATE adayo_core)
     add_test(NAME adayo_p5_playback_tests COMMAND adayo_p5_playback_tests)
+
+    add_executable(adayo_p6_compare_tests tests/p6_compare_tests.cpp)
+    target_link_libraries(adayo_p6_compare_tests PRIVATE adayo_core)
+    add_test(NAME adayo_p6_compare_tests COMMAND adayo_p6_compare_tests)
+
+    if(ADAYO_WITH_LIBXLSXWRITER)
+        add_executable(adayo_p7_export_tests tests/p7_export_tests.cpp)
+        target_link_libraries(adayo_p7_export_tests PRIVATE adayo_core adayo_excel_writer)
+        if(ADAYO_WITH_OPENXLSX)
+            target_link_libraries(adayo_p7_export_tests PRIVATE adayo_excel_reader)
+            target_compile_definitions(adayo_p7_export_tests PRIVATE ADAYO_CAN_VERIFY_XLSX_READ=1)
+        endif()
+        add_custom_command(TARGET adayo_p7_export_tests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin/xlsxwriter.dll"
+                "$<TARGET_FILE_DIR:adayo_p7_export_tests>")
+        add_test(NAME adayo_p7_export_tests COMMAND adayo_p7_export_tests)
+    endif()
 
     if(ADAYO_WITH_OPENXLSX AND ADAYO_WITH_JSON_CONFIG)
         add_executable(adayo_p2_tests tests/p2_workbook_tests.cpp)

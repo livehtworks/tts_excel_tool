@@ -1,6 +1,9 @@
 #include "adapters/excel/LibXlsxWriterExporter.h"
 
 #include <algorithm>
+#include <chrono>
+#include <filesystem>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -19,6 +22,21 @@ std::string PathUtf8(const std::filesystem::path& p) {
 #else
     return p.u8string();
 #endif
+}
+
+bool ContainsNonAscii(const std::filesystem::path& path) {
+    const auto text = path.u8string();
+    return std::any_of(text.begin(), text.end(), [](char8_t c) {
+        return static_cast<unsigned char>(c) >= 0x80;
+    });
+}
+
+std::filesystem::path MakeAsciiOutputPath(const std::filesystem::path& original) {
+    const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto hash = std::hash<std::string>{}(PathUtf8(original));
+    auto dir = std::filesystem::temp_directory_path() / "adayo_xlsxwriter";
+    std::filesystem::create_directories(dir);
+    return dir / ("export_" + std::to_string(hash) + "_" + std::to_string(ticks) + ".xlsx");
 }
 
 const char* StatusText(CompareStatus status) {
@@ -67,19 +85,70 @@ void WriteRichFragments(lxw_worksheet* ws,
 
 struct WorkbookGuard {
     lxw_workbook* wb{};
+    std::filesystem::path final_path;
+    std::filesystem::path working_path;
     bool closed{false};
+
+    WorkbookGuard() = default;
+    WorkbookGuard(lxw_workbook* workbook, std::filesystem::path final, std::filesystem::path working)
+        : wb(workbook), final_path(std::move(final)), working_path(std::move(working)) {}
+    WorkbookGuard(const WorkbookGuard&) = delete;
+    WorkbookGuard& operator=(const WorkbookGuard&) = delete;
+    WorkbookGuard(WorkbookGuard&& other) noexcept
+        : wb(other.wb),
+          final_path(std::move(other.final_path)),
+          working_path(std::move(other.working_path)),
+          closed(other.closed) {
+        other.wb = nullptr;
+        other.closed = true;
+    }
+    WorkbookGuard& operator=(WorkbookGuard&& other) noexcept {
+        if (this == &other) return *this;
+        wb = other.wb;
+        final_path = std::move(other.final_path);
+        working_path = std::move(other.working_path);
+        closed = other.closed;
+        other.wb = nullptr;
+        other.closed = true;
+        return *this;
+    }
+
     ~WorkbookGuard() {
         if (wb && !closed) workbook_close(wb);
+        if (!working_path.empty() && working_path != final_path) {
+            std::error_code ec;
+            std::filesystem::remove(working_path, ec);
+        }
+    }
+
+    void Close() {
+        const lxw_error close_error = workbook_close(wb);
+        closed = true;
+        Check(close_error, "workbook_close");
+        if (!working_path.empty() && working_path != final_path) {
+            if (final_path.has_parent_path()) {
+                std::filesystem::create_directories(final_path.parent_path());
+            }
+            std::filesystem::copy_file(working_path, final_path, std::filesystem::copy_options::overwrite_existing);
+        }
     }
 };
+
+WorkbookGuard CreateWorkbook(const std::filesystem::path& output) {
+    const auto working = ContainsNonAscii(output) ? MakeAsciiOutputPath(output) : output;
+    if (working.has_parent_path()) {
+        std::filesystem::create_directories(working.parent_path());
+    }
+    WorkbookGuard guard{workbook_new(PathUtf8(working).c_str()), output, working};
+    if (!guard.wb) throw std::runtime_error("workbook_new 失败");
+    return guard;
+}
 }
 #endif
 
 void LibXlsxWriterExporter::ExportRuntimeView(const RuntimeView& view, const std::filesystem::path& output) {
 #ifdef ADAYO_HAS_LIBXLSXWRITER
-    const std::string output_utf8 = PathUtf8(output);
-    WorkbookGuard guard{workbook_new(output_utf8.c_str()), false};
-    if (!guard.wb) throw std::runtime_error("workbook_new 失败");
+    auto guard = CreateWorkbook(output);
     lxw_worksheet* ws = workbook_add_worksheet(guard.wb, "运行视图");
     if (!ws) throw std::runtime_error("workbook_add_worksheet 失败");
 
@@ -102,9 +171,7 @@ void LibXlsxWriterExporter::ExportRuntimeView(const RuntimeView& view, const std
     if (!view.headers.empty()) worksheet_autofilter(ws, 0, 0, static_cast<lxw_row_t>(view.rows.size()), static_cast<lxw_col_t>(view.headers.size() - 1));
     for (lxw_col_t c = 0; c < view.headers.size(); ++c) worksheet_set_column(ws, c, c, c == 0 ? 8.0 : 28.0, nullptr);
 
-    const lxw_error close_error = workbook_close(guard.wb);
-    guard.closed = true;
-    Check(close_error, "workbook_close");
+    guard.Close();
 #else
     (void)view; (void)output;
     throw std::runtime_error("当前构建未启用 libxlsxwriter");
@@ -113,9 +180,7 @@ void LibXlsxWriterExporter::ExportRuntimeView(const RuntimeView& view, const std
 
 void LibXlsxWriterExporter::ExportComparison(const std::vector<CompareRow>& rows, const std::filesystem::path& output) {
 #ifdef ADAYO_HAS_LIBXLSXWRITER
-    const std::string output_utf8 = PathUtf8(output);
-    WorkbookGuard guard{workbook_new(output_utf8.c_str()), false};
-    if (!guard.wb) throw std::runtime_error("workbook_new 失败");
+    auto guard = CreateWorkbook(output);
     lxw_worksheet* ws = workbook_add_worksheet(guard.wb, "文本对比");
     if (!ws) throw std::runtime_error("workbook_add_worksheet 失败");
 
@@ -149,9 +214,7 @@ void LibXlsxWriterExporter::ExportComparison(const std::vector<CompareRow>& rows
     worksheet_set_column(ws, 2, 2, 12.0, nullptr);
     worksheet_set_column(ws, 3, 3, 14.0, nullptr);
 
-    const lxw_error close_error = workbook_close(guard.wb);
-    guard.closed = true;
-    Check(close_error, "workbook_close");
+    guard.Close();
 #else
     (void)rows; (void)output;
     throw std::runtime_error("当前构建未启用 libxlsxwriter");

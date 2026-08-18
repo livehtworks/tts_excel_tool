@@ -44,6 +44,18 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 - OpenXLSX 0.5.1 only exposes `XLDocument::open(const std::string&)` in the tested package.
 - `OpenXlsxWorkbookReader` stages non-ASCII workbook paths through `%TEMP%\adayo_openxlsx` before reading. Keep Chinese path coverage in `adayo_p2_tests`.
 
+## libxlsxwriter
+
+- The tested vcpkg `libxlsxwriter@1.2.4#1` installation omitted headers under `third_party/` required by `xlsxwriter/common.h`.
+- Local repair used the same vcpkg buildtree source:
+
+```powershell
+Copy-Item -Path D:\programsoft\tools\vcpkg\buildtrees\libxlsxwriter\src\v1.2.4-e41530bd32.clean\include\xlsxwriter\third_party\* `
+  -Destination build\windows-release\vcpkg_installed\x64-windows\include\third_party -Force
+```
+
+- `LibXlsxWriterExporter` stages non-ASCII output paths through `%TEMP%\adayo_xlsxwriter` before copying to the requested path.
+
 ## Model Downloads
 
 - `hf-mirror.com` is usable for sherpa/Piper model files without the local proxy.

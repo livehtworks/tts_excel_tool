@@ -43,7 +43,7 @@ void DataCallback(ma_device* device, void* output, const void*, ma_uint32 frame_
     }
 
     const auto remaining = impl->samples.size() - impl->cursor;
-    const auto to_copy = std::min(requested, remaining);
+    const auto to_copy = (std::min)(requested, remaining);
     std::copy_n(impl->samples.data() + impl->cursor, to_copy, out);
     impl->cursor += to_copy;
     if (impl->cursor >= impl->samples.size()) {

@@ -22,6 +22,7 @@ public:
 
 private:
     void RefreshGrid();
+    void OnExport(wxCommandEvent& event);
     void OnCellChanged(wxGridEvent& event);
     void OnCellDClick(wxGridEvent& event);
 
