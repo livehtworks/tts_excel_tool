@@ -1,6 +1,7 @@
 #include "services/WorkbookService.h"
 
 #include <algorithm>
+#include <cctype>
 #include <sstream>
 #include <stdexcept>
 
@@ -42,8 +43,12 @@ WorkbookAnalysis WorkbookService::AnalyzeSheet(
             if (saved != analysis.saved_mapping->columns.end()) {
                 column.selected = saved->selected;
                 column.role = saved->role;
-                column.language_code = saved->language_code;
+                if (saved->language_user_overridden) {
+                    column.language_code = saved->language_code;
+                    column.language_user_overridden = true;
+                }
                 column.tts_engine_id = saved->tts_engine_id;
+                column.tts_model_id = saved->tts_model_id;
             }
         }
     }
@@ -55,13 +60,15 @@ std::string WorkbookService::WorkbookIdentity(const std::filesystem::path& path)
     std::error_code ec;
     const auto absolute = std::filesystem::weakly_canonical(path, ec);
     const auto effective = ec ? std::filesystem::absolute(path, ec) : absolute;
-    const auto last_write = std::filesystem::exists(path) ? std::filesystem::last_write_time(path, ec).time_since_epoch().count() : 0;
-    const auto size = std::filesystem::exists(path) ? std::filesystem::file_size(path, ec) : 0;
     const auto u8 = effective.u8string();
     std::string path_text(u8.begin(), u8.end());
-    std::ostringstream out;
-    out << path_text << "|" << size << "|" << last_write;
-    return out.str();
+    std::replace(path_text.begin(), path_text.end(), '\\', '/');
+#ifdef _WIN32
+    std::transform(path_text.begin(), path_text.end(), path_text.begin(), [](unsigned char c) {
+        return c < 128 ? static_cast<char>(std::tolower(c)) : static_cast<char>(c);
+    });
+#endif
+    return path_text;
 }
 
 std::optional<SheetMappingConfig> WorkbookService::FindMapping(
@@ -78,6 +85,38 @@ std::optional<SheetMappingConfig> WorkbookService::FindMapping(
         }
     }
     return std::nullopt;
+}
+
+std::optional<std::size_t> WorkbookService::FindHeaderRow(
+    const AppConfig& config,
+    const std::string& workbook_identity,
+    const std::string& sheet_name) {
+
+    for (const auto& row : config.sheet_header_rows) {
+        if (row.workbook_identity == workbook_identity && row.sheet_name == sheet_name) {
+            return row.header_row;
+        }
+    }
+    return std::nullopt;
+}
+
+void WorkbookService::UpsertHeaderRow(
+    AppConfig& config,
+    std::string workbook_identity,
+    std::string sheet_name,
+    std::size_t header_row) {
+
+    auto existing = std::find_if(
+        config.sheet_header_rows.begin(),
+        config.sheet_header_rows.end(),
+        [&](const SheetHeaderRowConfig& item) {
+            return item.workbook_identity == workbook_identity && item.sheet_name == sheet_name;
+        });
+    if (existing == config.sheet_header_rows.end()) {
+        config.sheet_header_rows.push_back({std::move(workbook_identity), std::move(sheet_name), header_row});
+    } else {
+        existing->header_row = header_row;
+    }
 }
 
 void WorkbookService::UpsertMapping(AppConfig& config, SheetMappingConfig mapping) {

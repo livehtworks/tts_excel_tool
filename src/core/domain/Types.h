@@ -52,7 +52,9 @@ struct ColumnProfile {
     bool selected{false};
     ColumnRole role{ColumnRole::Ignore};
     std::string language_code;
+    bool language_user_overridden{false};
     std::string tts_engine_id{"sherpa-vits"};
+    std::string tts_model_id;
 };
 
 struct SelectedColumn {
@@ -62,6 +64,7 @@ struct SelectedColumn {
     ColumnRole role{ColumnRole::Ignore};
     std::string language_code;
     std::string tts_engine_id{"sherpa-vits"};
+    std::string tts_model_id;
 };
 
 struct DisplayRowMeta {

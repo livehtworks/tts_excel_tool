@@ -3,6 +3,8 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <algorithm>
+#include <utility>
 
 #include <nlohmann/json.hpp>
 
@@ -68,17 +70,43 @@ ModelRegistry::ModelRegistry(std::filesystem::path models_root)
     : models_root_(std::move(models_root)) {}
 
 std::vector<TtsModelEntry> ModelRegistry::ScanSherpaModels() const {
-    std::vector<TtsModelEntry> entries;
+    return ScanSherpaModelsWithDiagnostics().entries;
+}
+
+ModelRegistryScanResult ModelRegistry::ScanSherpaModelsWithDiagnostics() const {
+    ModelRegistryScanResult result;
+    std::vector<std::filesystem::path> model_files;
+    std::vector<TtsModelDiagnostic> missing_json_dirs;
     if (!std::filesystem::exists(models_root_)) {
-        return entries;
+        return result;
     }
     for (const auto& dir : std::filesystem::directory_iterator(models_root_)) {
         if (!dir.is_directory()) continue;
         const auto model_json = dir.path() / "model.json";
-        if (!std::filesystem::exists(model_json)) continue;
-        entries.push_back(LoadModelJson(model_json));
+        if (!std::filesystem::exists(model_json)) {
+            missing_json_dirs.push_back({dir.path(), dir.path().filename().string(), "缺少 model.json"});
+            continue;
+        }
+        model_files.push_back(model_json);
     }
-    return entries;
+    std::sort(model_files.begin(), model_files.end(), [](const auto& left, const auto& right) {
+        return left.generic_u8string() < right.generic_u8string();
+    });
+    for (const auto& model_json : model_files) {
+        try {
+            result.entries.push_back(LoadModelJson(model_json));
+        } catch (const std::exception& ex) {
+            result.invalid.push_back({model_json.parent_path(), model_json.parent_path().filename().string(), ex.what()});
+        }
+    }
+    std::sort(result.entries.begin(), result.entries.end(), [](const auto& left, const auto& right) {
+        return left.id < right.id;
+    });
+    std::sort(missing_json_dirs.begin(), missing_json_dirs.end(), [](const auto& left, const auto& right) {
+        return left.path.generic_u8string() < right.path.generic_u8string();
+    });
+    result.invalid.insert(result.invalid.end(), missing_json_dirs.begin(), missing_json_dirs.end());
+    return result;
 }
 
 TtsModelEntry ModelRegistry::LoadModelJson(const std::filesystem::path& model_json) {

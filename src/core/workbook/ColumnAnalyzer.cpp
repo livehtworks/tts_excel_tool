@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -60,6 +61,25 @@ const std::unordered_map<std::string, std::string> kExactAliases = {
 
 bool Contains(const std::string& s, const std::string& needle) {
     return s.find(needle) != std::string::npos;
+}
+
+std::string LowerAscii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
+}
+
+bool IsBusinessResultHeader(const std::string& header) {
+    if (header == "测试结果") return true;
+    const auto lower = LowerAscii(header);
+    if (lower == "result" || lower == "results") return true;
+    constexpr std::string_view suffix = "结果";
+    if (header.size() <= suffix.size()) return false;
+    if (header.compare(header.size() - suffix.size(), suffix.size(), suffix) != 0) return false;
+    const auto prefix = header.substr(0, header.size() - suffix.size());
+    if (prefix.empty()) return false;
+    return !ColumnAnalyzer{}.GuessLanguage(prefix).empty();
 }
 }
 
@@ -121,7 +141,7 @@ std::string ColumnAnalyzer::GuessLanguage(const std::string& raw_header) const {
 SuggestedColumnType ColumnAnalyzer::GuessType(const std::string& header) const {
     const std::string h = Trim(header);
     if (h.empty()) return SuggestedColumnType::Unknown;
-    if (Contains(h, "测试结果") || h == "result" || h == "results" || h == "Result" || h == "Results") {
+    if (IsBusinessResultHeader(h)) {
         return SuggestedColumnType::Result;
     }
     if (Contains(h, "说法举例")) return SuggestedColumnType::Utterance;
@@ -156,9 +176,8 @@ std::vector<ColumnProfile> ColumnAnalyzer::Analyze(
         p.suggested_type = GuessType(p.header);
         p.guessed_language = GuessLanguage(p.header);
         p.language_code = p.guessed_language;
-        p.selected = p.suggested_type == SuggestedColumnType::Utterance || p.suggested_type == SuggestedColumnType::Meta;
-        p.role = p.suggested_type == SuggestedColumnType::Utterance ? ColumnRole::Play :
-                 p.suggested_type == SuggestedColumnType::Meta ? ColumnRole::Reference : ColumnRole::Ignore;
+        p.selected = p.suggested_type == SuggestedColumnType::Utterance;
+        p.role = p.suggested_type == SuggestedColumnType::Utterance ? ColumnRole::Play : ColumnRole::Ignore;
         p.tts_engine_id = "sherpa-vits";
         out.push_back(std::move(p));
     }

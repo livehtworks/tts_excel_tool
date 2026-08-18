@@ -1,6 +1,7 @@
 #pragma once
 
 #include "persistence/JsonConfigStore.h"
+#include "services/ModelRegistry.h"
 #include "services/WorkbookService.h"
 
 #include <memory>
@@ -11,6 +12,7 @@
 class wxButton;
 class wxChoice;
 class wxGrid;
+class wxGridEvent;
 class wxSpinCtrl;
 class wxStaticText;
 class wxTextCtrl;
@@ -29,9 +31,19 @@ private:
     void OnAnalyze(wxCommandEvent& event);
     void OnBuildView(wxCommandEvent& event);
     void OnSaveMapping(wxCommandEvent& event);
+    void OnSelectAll(wxCommandEvent& event);
+    void OnSelectNone(wxCommandEvent& event);
+    void OnApplyRole(wxCommandEvent& event);
+    void OnSheetChanged(wxCommandEvent& event);
+    void OnGridCellChanged(wxGridEvent& event);
 
     void AnalyzeCurrentSheet();
     void FillColumnGrid();
+    void LoadModelRegistry();
+    void ConfigureRowEditors(int row);
+    void RefreshRowModelStatus(int row);
+    std::vector<std::string> ModelIdsForLanguage(const std::string& language_code) const;
+    bool IsKnownModelForLanguage(const std::string& model_id, const std::string& language_code) const;
     std::vector<SelectedColumn> SelectedColumnsFromGrid() const;
     std::string WorkbookPath() const;
     std::string SheetName() const;
@@ -41,11 +53,14 @@ private:
     JsonConfigStore config_store_;
     AppConfig config_;
     std::optional<WorkbookAnalysis> analysis_;
+    std::vector<TtsModelEntry> model_entries_;
+    std::vector<TtsModelDiagnostic> model_invalid_;
 
     wxTextCtrl* workbook_path_{};
     wxChoice* sheet_choice_{};
     wxSpinCtrl* header_row_{};
     wxGrid* column_grid_{};
+    wxChoice* batch_role_{};
     wxStaticText* status_{};
 };
 

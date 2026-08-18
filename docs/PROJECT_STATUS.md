@@ -43,6 +43,7 @@ Current phase: P9 acceptance revoked pending remediation R0-R6.
 - `scripts/package_windows.ps1` packages the release app, fixed DLLs, runtime directories, accepted sherpa models, and audit docs without downloading.
 - Previous P9 local release regression and package smoke evidence is superseded by R0 because Release tests used `assert()` before R0.
 - R0 replaced Release-unsafe `assert()` tests with always-on test checks and exposed the R1-1 `ENG结果` column classification failure.
+- R1 fixed result-column recognition, default mapping roles, `tts_model_id` persistence, schema v2 language override semantics, path-only workbook identity, sheet/header row storage, and model registry diagnostics.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
 - Downloaded local candidate sherpa/Piper models:
   - `models/sherpa/vits-piper-en_US-amy-low`
@@ -50,7 +51,7 @@ Current phase: P9 acceptance revoked pending remediation R0-R6.
 
 ## Active Work
 
-- Execute remediation checklist R0-R6 in order; R1-1 is next.
+- Execute remediation checklist R0-R6 in order; R2 is next.
 
 ## Not Yet Complete
 

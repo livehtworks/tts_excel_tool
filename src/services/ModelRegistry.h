@@ -15,11 +15,23 @@ struct TtsModelEntry {
     TtsModelConfig config;
 };
 
+struct TtsModelDiagnostic {
+    std::filesystem::path path;
+    std::string id;
+    std::string error;
+};
+
+struct ModelRegistryScanResult {
+    std::vector<TtsModelEntry> entries;
+    std::vector<TtsModelDiagnostic> invalid;
+};
+
 class ModelRegistry {
 public:
     explicit ModelRegistry(std::filesystem::path models_root);
 
     std::vector<TtsModelEntry> ScanSherpaModels() const;
+    ModelRegistryScanResult ScanSherpaModelsWithDiagnostics() const;
     static TtsModelEntry LoadModelJson(const std::filesystem::path& model_json);
 
 private:

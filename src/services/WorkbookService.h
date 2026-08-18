@@ -38,6 +38,15 @@ public:
         const std::string& workbook_identity,
         const std::string& sheet_name,
         std::size_t header_row);
+    static std::optional<std::size_t> FindHeaderRow(
+        const AppConfig& config,
+        const std::string& workbook_identity,
+        const std::string& sheet_name);
+    static void UpsertHeaderRow(
+        AppConfig& config,
+        std::string workbook_identity,
+        std::string sheet_name,
+        std::size_t header_row);
     static void UpsertMapping(AppConfig& config, SheetMappingConfig mapping);
 
 private:
