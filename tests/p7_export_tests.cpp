@@ -31,9 +31,9 @@ RuntimeView MakeRuntimeView() {
         {1, "ENG", "B", ColumnRole::Play, "en-US", "sherpa-vits"},
         {2, "中文", "C", ColumnRole::Play, "zh-CN", "sherpa-vits"},
     };
-    std::unordered_map<std::string, std::string> results = {
-        {"0|1", "pass"},
-        {"1|1", "fail"},
+    std::unordered_map<ResultIdentity, std::string, ResultIdentityHash> results = {
+        {{0, 1, 0}, "pass"},
+        {{0, 1, 1}, "fail"},
     };
     return builder.Build(rows, columns, results).view;
 }

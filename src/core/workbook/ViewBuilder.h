@@ -2,8 +2,8 @@
 
 #include "core/domain/Types.h"
 
-#include <string>
 #include <unordered_map>
+#include <string>
 #include <vector>
 
 namespace adayo {
@@ -18,7 +18,7 @@ public:
     BuildResult Build(
         const std::vector<std::vector<std::string>>& raw_rows,
         std::vector<SelectedColumn> selected_columns,
-        const std::unordered_map<std::string, std::string>& result_marks = {}) const;
+        const std::unordered_map<ResultIdentity, std::string, ResultIdentityHash>& result_marks = {}) const;
 
     static std::vector<std::string> SplitDisplaySegments(const std::string& value);
 };

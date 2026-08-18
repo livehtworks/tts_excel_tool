@@ -344,6 +344,57 @@ void TestCorpusViewEditAndResultCycle() {
     REQUIRE(service.CycleResult(session, 0, 3) == ResultCycleState::Blank);
     REQUIRE(session.view.rows[0][3].empty());
 }
+
+void TestResultIdentitySurvivesEarlierRowStructureEdit() {
+    std::vector<std::vector<std::string>> rows = {
+        {"ref-a", "a1\na2\na3", "b1"},
+        {"ref-b", "target", "other"},
+    };
+    std::vector<SelectedColumn> columns = {
+        {0, "REF", "A", ColumnRole::Reference, "", "", ""},
+        {1, "ENG", "B", ColumnRole::Play, "en-US", "sherpa-vits", "voice-en"},
+        {2, "ENU", "C", ColumnRole::Play, "en-US", "sherpa-vits", "voice-us"},
+    };
+
+    CorpusViewService service;
+    auto session = service.CreateSession(rows, columns);
+    REQUIRE(service.CycleResult(session, 3, 3) == ResultCycleState::Ok);
+    REQUIRE(session.view.rows[3][3] == "✔");
+
+    service.UpdateDisplayCell(session, 0, 2, "");
+    REQUIRE(session.view.rows[2][3] == "✔");
+    REQUIRE(session.view.row_meta[2].raw_row_index == 1);
+}
+
+void TestSyntheticBlankCannotBeEditedOrMarked() {
+    std::vector<std::vector<std::string>> rows = {
+        {"ref-a", "a1\na2\na3", "b1"},
+    };
+    std::vector<SelectedColumn> columns = {
+        {0, "REF", "A", ColumnRole::Reference, "", "", ""},
+        {1, "ENG", "B", ColumnRole::Play, "en-US", "sherpa-vits", "voice-en"},
+        {2, "ENU", "C", ColumnRole::Play, "en-US", "sherpa-vits", "voice-us"},
+    };
+
+    CorpusViewService service;
+    auto session = service.CreateSession(rows, columns);
+    bool edit_threw = false;
+    try {
+        service.UpdateDisplayCell(session, 2, 4, "should not append second segment");
+    } catch (const std::invalid_argument&) {
+        edit_threw = true;
+    }
+    REQUIRE(edit_threw);
+    REQUIRE(session.source_rows[0][2] == "b1");
+
+    bool result_threw = false;
+    try {
+        (void)service.CycleResult(session, 2, 5);
+    } catch (const std::invalid_argument&) {
+        result_threw = true;
+    }
+    REQUIRE(result_threw);
+}
 } // namespace
 
 int main() {
@@ -358,5 +409,7 @@ int main() {
         TestSavedLanguageOverrideSemantics();
         TestModelRegistryKeepsValidModelsWhenOneIsBroken();
         TestCorpusViewEditAndResultCycle();
+        TestResultIdentitySurvivesEarlierRowStructureEdit();
+        TestSyntheticBlankCannotBeEditedOrMarked();
     });
 }

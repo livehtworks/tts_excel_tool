@@ -87,7 +87,13 @@ void CorpusRunPanel::RefreshGrid() {
             for (std::size_t c = 0; c < view.headers.size(); ++c) {
                 const std::string value = c < view.rows[r].size() ? view.rows[r][c] : std::string{};
                 grid_->SetCellValue(static_cast<int>(r), static_cast<int>(c), FromUtf8(value));
-                if (c < view.columns.size() && view.columns[c].role == ColumnRole::Index) {
+                bool read_only = c < view.columns.size() &&
+                    (view.columns[c].role == ColumnRole::Index || view.columns[c].role == ColumnRole::Result);
+                if (c < view.columns.size() && view.columns[c].role == ColumnRole::Play && r < view.row_meta.size()) {
+                    const auto segment = view.row_meta[r].segment_indexes.find(view.columns[c].source_index);
+                    read_only = segment == view.row_meta[r].segment_indexes.end() || !segment->second.has_value();
+                }
+                if (read_only) {
                     grid_->SetReadOnly(static_cast<int>(r), static_cast<int>(c));
                 }
             }
@@ -106,10 +112,22 @@ void CorpusRunPanel::OnCellChanged(wxGridEvent& event) {
     try {
         const auto row = static_cast<std::size_t>(event.GetRow());
         const auto col = static_cast<std::size_t>(event.GetCol());
+        const auto old_row_count = session_->view.rows.size();
+        const auto old_col_count = session_->view.headers.size();
         service_.UpdateDisplayCell(*session_, row, col, ToUtf8(grid_->GetCellValue(event.GetRow(), event.GetCol())));
-        RefreshGrid();
+        if (session_->view.rows.size() != old_row_count || session_->view.headers.size() != old_col_count) {
+            RefreshGrid();
+        } else {
+            grid_->SetCellValue(event.GetRow(), event.GetCol(), FromUtf8(session_->view.rows[row][col]));
+        }
     } catch (const std::exception& ex) {
         status_->SetLabel(FromUtf8(ex.what()));
+        if (session_ && event.GetRow() >= 0 && event.GetCol() >= 0 &&
+            static_cast<std::size_t>(event.GetRow()) < session_->view.rows.size() &&
+            static_cast<std::size_t>(event.GetCol()) < session_->view.rows[static_cast<std::size_t>(event.GetRow())].size()) {
+            grid_->SetCellValue(event.GetRow(), event.GetCol(),
+                FromUtf8(session_->view.rows[static_cast<std::size_t>(event.GetRow())][static_cast<std::size_t>(event.GetCol())]));
+        }
     }
 }
 
@@ -123,7 +141,7 @@ void CorpusRunPanel::OnCellDClick(wxGridEvent& event) {
         const auto col = static_cast<std::size_t>(event.GetCol());
         if (col < session_->view.columns.size() && session_->view.columns[col].role == ColumnRole::Result) {
             service_.CycleResult(*session_, row, col);
-            RefreshGrid();
+            grid_->SetCellValue(event.GetRow(), event.GetCol(), FromUtf8(session_->view.rows[row][col]));
             return;
         }
     } catch (const std::exception& ex) {

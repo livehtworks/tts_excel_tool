@@ -18,7 +18,7 @@ struct CorpusSession {
     std::vector<std::vector<std::string>> source_rows;
     std::vector<SelectedColumn> selected_columns;
     RuntimeView view;
-    std::unordered_map<std::string, std::string> result_marks;
+    std::unordered_map<ResultIdentity, std::string, ResultIdentityHash> result_marks;
 };
 
 class CorpusViewService {
@@ -32,7 +32,8 @@ public:
     void Rebuild(CorpusSession& session) const;
 
 private:
-    static std::string ResultKey(std::size_t display_row, std::size_t source_column);
+    static ResultIdentity ResultKey(const RuntimeView& view, std::size_t display_row, std::size_t result_display_column);
+    static void InvalidateResultsFromSegment(CorpusSession& session, std::size_t raw_row, std::size_t source_column, std::size_t first_segment);
     static std::string JoinSegments(std::vector<std::string> segments);
     ViewBuilder builder_;
 };

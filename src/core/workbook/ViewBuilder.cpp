@@ -39,7 +39,7 @@ std::vector<std::string> ViewBuilder::SplitDisplaySegments(const std::string& va
 ViewBuilder::BuildResult ViewBuilder::Build(
     const std::vector<std::vector<std::string>>& raw_rows,
     std::vector<SelectedColumn> selected_columns,
-    const std::unordered_map<std::string, std::string>& result_marks) const {
+    const std::unordered_map<ResultIdentity, std::string, ResultIdentityHash>& result_marks) const {
 
     selected_columns.erase(
         std::remove_if(selected_columns.begin(), selected_columns.end(),
@@ -126,9 +126,14 @@ ViewBuilder::BuildResult ViewBuilder::Build(
         for (std::size_t c = 0; c < selected_columns.size(); ++c) {
             final_row.push_back(base_rows[r][c]);
             if (selected_columns[c].role == ColumnRole::Play) {
-                const std::string key = std::to_string(r) + "|" + std::to_string(selected_columns[c].source_index);
-                auto it = result_marks.find(key);
-                final_row.push_back(it == result_marks.end() ? std::string{} : ResultSymbol(it->second));
+                std::string result;
+                const auto segment = row_meta[r].segment_indexes.find(selected_columns[c].source_index);
+                if (segment != row_meta[r].segment_indexes.end() && segment->second.has_value()) {
+                    const ResultIdentity key{row_meta[r].raw_row_index, selected_columns[c].source_index, *segment->second};
+                    auto it = result_marks.find(key);
+                    if (it != result_marks.end()) result = ResultSymbol(it->second);
+                }
+                final_row.push_back(result);
             }
         }
         view.rows.push_back(std::move(final_row));

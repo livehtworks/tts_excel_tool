@@ -67,6 +67,27 @@ struct SelectedColumn {
     std::string tts_model_id;
 };
 
+struct ResultIdentity {
+    std::size_t raw_row_index{};
+    std::size_t play_source_column{};
+    std::size_t segment_index{};
+
+    friend bool operator==(const ResultIdentity& left, const ResultIdentity& right) noexcept {
+        return left.raw_row_index == right.raw_row_index &&
+               left.play_source_column == right.play_source_column &&
+               left.segment_index == right.segment_index;
+    }
+};
+
+struct ResultIdentityHash {
+    std::size_t operator()(const ResultIdentity& identity) const noexcept {
+        std::size_t seed = identity.raw_row_index + 0x9e3779b97f4a7c15ull;
+        seed ^= identity.play_source_column + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2);
+        seed ^= identity.segment_index + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2);
+        return seed;
+    }
+};
+
 struct DisplayRowMeta {
     std::size_t raw_row_index{};
     std::size_t expanded_index{};

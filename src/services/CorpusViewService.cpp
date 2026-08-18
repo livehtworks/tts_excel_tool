@@ -1,5 +1,6 @@
 #include "services/CorpusViewService.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace adayo {
@@ -55,25 +56,34 @@ void CorpusViewService::UpdateDisplayCell(
     if (view_column.role == ColumnRole::Play) {
         auto segment_it = meta.segment_indexes.find(view_column.source_index);
         if (segment_it == meta.segment_indexes.end() || !segment_it->second.has_value()) {
-            if (!value.empty()) {
-                auto segments = ViewBuilder::SplitDisplaySegments(source_cell);
-                segments.push_back(value);
-                source_cell = JoinSegments(std::move(segments));
-            }
+            throw std::invalid_argument("无法编辑 synthetic blank 播放单元格");
         } else {
             auto segments = ViewBuilder::SplitDisplaySegments(source_cell);
+            const auto old_size = segments.size();
             const auto segment_index = *segment_it->second;
             if (segment_index >= segments.size()) {
                 segments.resize(segment_index + 1);
             }
             segments[segment_index] = value;
             source_cell = JoinSegments(std::move(segments));
+            const auto new_segments = ViewBuilder::SplitDisplaySegments(source_cell);
+            if (new_segments.size() == old_size) {
+                session.view.rows[display_row][display_column] = value;
+                return;
+            }
+            InvalidateResultsFromSegment(session, meta.raw_row_index, view_column.source_index, segment_index);
+            Rebuild(session);
+            return;
         }
     } else {
         source_cell = value;
+        for (std::size_t row = 0; row < session.view.row_meta.size(); ++row) {
+            if (session.view.row_meta[row].raw_row_index == meta.raw_row_index) {
+                session.view.rows[row][display_column] = value;
+            }
+        }
+        return;
     }
-
-    Rebuild(session);
 }
 
 ResultCycleState CorpusViewService::CycleResult(CorpusSession& session, std::size_t display_row, std::size_t display_column) const {
@@ -84,30 +94,58 @@ ResultCycleState CorpusViewService::CycleResult(CorpusSession& session, std::siz
     if (column.role != ColumnRole::Result) {
         throw std::invalid_argument("当前列不是结果列");
     }
-    const auto key = ResultKey(display_row, column.source_index);
+    const auto key = ResultKey(session.view, display_row, display_column);
     const auto current = session.result_marks.find(key);
     if (current == session.result_marks.end() || current->second.empty()) {
         session.result_marks[key] = "pass";
-        Rebuild(session);
+        session.view.rows[display_row][display_column] = "✔";
         return ResultCycleState::Ok;
     }
     if (current->second == "pass") {
         session.result_marks[key] = "fail";
-        Rebuild(session);
+        session.view.rows[display_row][display_column] = "×";
         return ResultCycleState::Ng;
     }
     if (IsResultText(current->second)) {
         session.result_marks.erase(key);
-        Rebuild(session);
+        session.view.rows[display_row][display_column].clear();
         return ResultCycleState::Blank;
     }
     session.result_marks.erase(key);
-    Rebuild(session);
+    session.view.rows[display_row][display_column].clear();
     return ResultCycleState::Blank;
 }
 
-std::string CorpusViewService::ResultKey(std::size_t display_row, std::size_t source_column) {
-    return std::to_string(display_row) + "|" + std::to_string(source_column);
+ResultIdentity CorpusViewService::ResultKey(const RuntimeView& view, std::size_t display_row, std::size_t result_display_column) {
+    if (display_row >= view.row_meta.size() || result_display_column >= view.columns.size()) {
+        throw std::out_of_range("结果身份越界");
+    }
+    const auto& column = view.columns[result_display_column];
+    if (column.role != ColumnRole::Result) {
+        throw std::invalid_argument("当前列不是结果列");
+    }
+    const auto& meta = view.row_meta[display_row];
+    const auto segment = meta.segment_indexes.find(column.source_index);
+    if (segment == meta.segment_indexes.end() || !segment->second.has_value()) {
+        throw std::invalid_argument("synthetic blank 没有可记录结果身份");
+    }
+    return {meta.raw_row_index, column.source_index, *segment->second};
+}
+
+void CorpusViewService::InvalidateResultsFromSegment(
+    CorpusSession& session,
+    std::size_t raw_row,
+    std::size_t source_column,
+    std::size_t first_segment) {
+
+    for (auto it = session.result_marks.begin(); it != session.result_marks.end();) {
+        const auto& key = it->first;
+        if (key.raw_row_index == raw_row && key.play_source_column == source_column && key.segment_index >= first_segment) {
+            it = session.result_marks.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 std::string CorpusViewService::JoinSegments(std::vector<std::string> segments) {
