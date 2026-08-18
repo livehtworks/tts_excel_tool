@@ -49,10 +49,10 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent,
     auto* root = new wxBoxSizer(wxVERTICAL);
     auto* top = new wxBoxSizer(wxHORIZONTAL);
     status_ = new wxStaticText(this, wxID_ANY, "尚未生成运行视图");
-    auto* export_button = new wxButton(this, wxID_ANY, "导出 Excel");
-    export_button->Bind(wxEVT_BUTTON, &CorpusRunPanel::OnExport, this);
+    export_button_ = new wxButton(this, wxID_ANY, "导出 Excel");
+    export_button_->Bind(wxEVT_BUTTON, &CorpusRunPanel::OnExport, this);
     top->Add(status_, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
-    top->Add(export_button, 0);
+    top->Add(export_button_, 0);
     root->Add(top, 0, wxEXPAND | wxALL, 6);
 
     auto* playback_bar = new wxBoxSizer(wxHORIZONTAL);
@@ -103,16 +103,32 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent,
 }
 
 void CorpusRunPanel::OnExport(wxCommandEvent&) {
-    if (!session_) return;
+    if (!session_ || export_busy_) return;
     wxFileDialog dialog(this, "导出运行视图", "", "runtime.xlsx", "Excel workbook (*.xlsx)|*.xlsx", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
     if (dialog.ShowModal() == wxID_OK) {
-        try {
+        const auto view = session_->view;
+        const auto output = std::filesystem::path(dialog.GetPath().ToStdWstring());
+        export_busy_ = true;
+        export_button_->Enable(false);
+        status_->SetLabel("运行视图导出中");
+        worker_.Submit([this, view, output] {
+            try {
             LibXlsxWriterExporter exporter;
-            exporter.ExportRuntimeView(session_->view, std::filesystem::path(dialog.GetPath().ToStdWstring()));
-            status_->SetLabel("运行视图已导出");
-        } catch (const std::exception& ex) {
-            status_->SetLabel(FromUtf8(ex.what()));
-        }
+                exporter.ExportRuntimeView(view, output);
+                CallAfter([this] {
+                    export_busy_ = false;
+                    export_button_->Enable(true);
+                    status_->SetLabel("运行视图已导出");
+                });
+            } catch (const std::exception& ex) {
+                const std::string error = ex.what();
+                CallAfter([this, error] {
+                    export_busy_ = false;
+                    export_button_->Enable(true);
+                    status_->SetLabel(FromUtf8(error));
+                });
+            }
+        });
     }
 }
 

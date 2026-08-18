@@ -133,6 +133,11 @@ struct CompareRow {
     CharacterDiffResult diff;
 };
 
+struct CompareReportGroup {
+    std::string label;
+    std::vector<CompareRow> rows;
+};
+
 struct AudioBuffer {
     std::vector<float> samples;
     std::int32_t sample_rate{};

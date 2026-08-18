@@ -1,3 +1,4 @@
+#include "adapters/text/TextFileImporter.h"
 #include "services/CompareService.h"
 
 #include "TestCheck.h"
@@ -98,6 +99,37 @@ void TestPunctuationSwitch() {
     REQUIRE(rows[0].status == CompareStatus::Ng);
 }
 
+void TestUnicodePunctuationWithUtf8proc() {
+#ifdef ADAYO_HAS_UTF8PROC
+    CompareService service;
+    CompareOptions options;
+    options.normalizer.ignore_punctuation = true;
+    options.pass_threshold = 100.0;
+    auto rows = service.Compare({"مرحبا، بالعالم؛"}, {"مرحبا بالعالم"}, options);
+    REQUIRE(rows.size() == 1);
+    REQUIRE(rows[0].status == CompareStatus::Ok);
+#else
+    std::cout << "P6 utf8proc punctuation category not enabled; skipping Arabic punctuation assertion\n";
+#endif
+}
+
+void TestTextImporterBomAndDelimiter() {
+    TextImportOptions newline_options;
+    auto records = TextFileImporter::SplitUtf8Records("\xEF\xBB\xBF第一行\r\n第二行\n\n第三行", newline_options);
+    REQUIRE(records.size() == 3);
+    REQUIRE(records[0] == "第一行");
+    REQUIRE(records[1] == "第二行");
+    REQUIRE(records[2] == "第三行");
+
+    TextImportOptions delimiter_options;
+    delimiter_options.delimiter = "\n---\n";
+    records = TextFileImporter::SplitUtf8Records("\xEF\xBB\xBF中文第一条\n---\nEnglish second\n---\nمرحبا\r\n", delimiter_options);
+    REQUIRE(records.size() == 3);
+    REQUIRE(records[0] == "中文第一条");
+    REQUIRE(records[1] == "English second");
+    REQUIRE(records[2] == "مرحبا");
+}
+
 void TestPerformance1000() {
     CompareService service;
     CompareOptions options;
@@ -125,6 +157,8 @@ int main() {
     return test::RunTestMain("adayo_p6_compare_tests", [] {
         TestFixedAlignmentSet();
         TestPunctuationSwitch();
+        TestUnicodePunctuationWithUtf8proc();
+        TestTextImporterBomAndDelimiter();
         TestPerformance1000();
     });
 }

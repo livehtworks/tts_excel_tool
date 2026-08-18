@@ -2,6 +2,10 @@
 
 #include <array>
 
+#ifdef ADAYO_HAS_UTF8PROC
+#include <utf8proc.h>
+#endif
+
 namespace adayo::unicode {
 namespace {
 constexpr char32_t kReplacement = 0xFFFD;
@@ -105,6 +109,20 @@ bool IsWhitespace(char32_t cp) {
 }
 
 bool IsPunctuation(char32_t cp) {
+#ifdef ADAYO_HAS_UTF8PROC
+    switch (utf8proc_category(static_cast<utf8proc_int32_t>(cp))) {
+        case UTF8PROC_CATEGORY_PC:
+        case UTF8PROC_CATEGORY_PD:
+        case UTF8PROC_CATEGORY_PS:
+        case UTF8PROC_CATEGORY_PE:
+        case UTF8PROC_CATEGORY_PI:
+        case UTF8PROC_CATEGORY_PF:
+        case UTF8PROC_CATEGORY_PO:
+            return true;
+        default:
+            break;
+    }
+#endif
     if ((cp >= U'!' && cp <= U'/') || (cp >= U':' && cp <= U'@') ||
         (cp >= U'[' && cp <= U'`') || (cp >= U'{' && cp <= U'~')) {
         return true;

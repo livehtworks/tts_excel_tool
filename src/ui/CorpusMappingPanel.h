@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/worker/WorkerQueue.h"
 #include "persistence/JsonConfigStore.h"
 #include "services/ModelRegistry.h"
 #include "services/WorkbookService.h"
@@ -40,6 +41,7 @@ private:
     void AnalyzeCurrentSheet();
     void FillColumnGrid();
     void LoadModelRegistry();
+    void SetBusy(bool busy, const wxString& message);
     void ConfigureRowEditors(int row);
     void RefreshRowModelStatus(int row);
     std::vector<std::string> ModelIdsForLanguage(const std::string& language_code) const;
@@ -55,12 +57,22 @@ private:
     std::optional<WorkbookAnalysis> analysis_;
     std::vector<TtsModelEntry> model_entries_;
     std::vector<TtsModelDiagnostic> model_invalid_;
+    WorkerQueue worker_;
+    bool busy_{false};
 
     wxTextCtrl* workbook_path_{};
     wxChoice* sheet_choice_{};
     wxSpinCtrl* header_row_{};
     wxGrid* column_grid_{};
     wxChoice* batch_role_{};
+    wxButton* load_button_{};
+    wxButton* browse_button_{};
+    wxButton* analyze_button_{};
+    wxButton* build_button_{};
+    wxButton* save_button_{};
+    wxButton* select_all_button_{};
+    wxButton* select_none_button_{};
+    wxButton* apply_role_button_{};
     wxStaticText* status_{};
 };
 

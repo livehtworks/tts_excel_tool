@@ -1,6 +1,7 @@
 #pragma once
 
 #include "services/CorpusViewService.h"
+#include "core/worker/WorkerQueue.h"
 #include "services/ModelRegistry.h"
 #include "services/PlaybackService.h"
 #include "services/TtsService.h"
@@ -64,8 +65,11 @@ private:
     wxButton* pause_button_{};
     wxButton* resume_button_{};
     wxButton* stop_button_{};
+    wxButton* export_button_{};
     wxStaticText* status_{};
     wxTimer playback_timer_;
+    WorkerQueue worker_;
+    bool export_busy_{false};
 };
 
 } // namespace adayo::ui

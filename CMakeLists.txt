@@ -29,6 +29,7 @@ add_library(adayo_core STATIC
     src/core/workbook/ColumnAnalyzer.cpp
     src/core/workbook/ViewBuilder.cpp
     src/core/worker/WorkerQueue.cpp
+    src/adapters/text/TextFileImporter.cpp
     src/services/CompareService.cpp
     src/services/CorpusViewService.cpp
     src/services/PlaybackService.cpp

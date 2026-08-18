@@ -48,6 +48,10 @@ Current phase: P9 acceptance revoked pending remediation R0-R6.
 - R3 wired the runtime UI to the real playback chain: selected play column, row range, interval, speed, pause/resume/stop, single-cell double-click playback, model-id loading, and current-cell highlighting.
 - R3 fixed pause during generation, interruptible intervals, stale worker stop/new-sequence state ownership, and miniaudio same-format device reuse.
 - R3 re-ran sherpa acceptance under always-on checks: speed sample-count ordering, 20 EN/ZH model switches, 500 English generations, and 500 Chinese generations.
+- R4 replaced Compare UI's single-pair flow with multi-language input groups and a matching report grid/export format where each group owns four columns.
+- R4 moved UTF-8 BOM/fixed-delimiter text import into `TextFileImporter` and tests it directly.
+- R4 uses utf8proc Unicode punctuation categories in release builds, including Arabic punctuation coverage.
+- R4 moved Compare work, Compare export, runtime Excel export, and workbook sheet/analyze operations off the wx UI thread through `WorkerQueue`.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
 - Downloaded local candidate sherpa/Piper models:
   - `models/sherpa/vits-piper-en_US-amy-low`
@@ -55,7 +59,7 @@ Current phase: P9 acceptance revoked pending remediation R0-R6.
 
 ## Active Work
 
-- Execute remediation checklist R0-R6 in order; R4 is next.
+- Execute remediation checklist R0-R6 in order; R5 is next.
 
 ## Not Yet Complete
 

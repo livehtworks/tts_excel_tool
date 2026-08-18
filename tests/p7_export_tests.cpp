@@ -86,11 +86,42 @@ void TestComparisonExport() {
     REQUIRE(data.rows[2][0] == "مرحبا بالعالم");
 #endif
 }
+
+void TestComparisonGroupExport() {
+    std::cout << "P7 comparison group export\n" << std::flush;
+    const auto output = OutputDir() / "多语言对比报告.xlsx";
+    CompareService service;
+    CompareOptions options;
+    options.pass_threshold = 100.0;
+    std::vector<CompareReportGroup> groups = {
+        {"中文", service.Compare({"打开空调"}, {"打开空调"}, options)},
+        {"English", service.Compare({"Turn on lights"}, {"Turn off lights"}, options)},
+    };
+
+    LibXlsxWriterExporter exporter;
+    exporter.ExportComparisonGroups(groups, output);
+    REQUIRE(std::filesystem::exists(output));
+    REQUIRE(std::filesystem::file_size(output) > 0);
+
+#ifdef ADAYO_CAN_VERIFY_XLSX_READ
+    std::cout << "P7 comparison group readback\n" << std::flush;
+    OpenXlsxWorkbookReader reader;
+    const auto data = reader.ReadSheet(output, "文本对比", 1);
+    REQUIRE(data.headers.size() == 8);
+    REQUIRE(data.headers[0] == "中文 正式文本");
+    REQUIRE(data.headers[4] == "English 正式文本");
+    REQUIRE(data.rows[0][0] == "打开空调");
+    REQUIRE(data.rows[0][3] == "OK");
+    REQUIRE(data.rows[0][4] == "Turn on lights");
+    REQUIRE(data.rows[0][7] == "NG");
+#endif
+}
 } // namespace
 
 int main() {
     return test::RunTestMain("adayo_p7_export_tests", [] {
         TestRuntimeExport();
         TestComparisonExport();
+        TestComparisonGroupExport();
     });
 }

@@ -108,12 +108,12 @@ CorpusMappingPanel::CorpusMappingPanel(wxWindow* parent, CorpusRunPanel* run_pan
 
     auto* file_row = new wxBoxSizer(wxHORIZONTAL);
     workbook_path_ = new wxTextCtrl(this, wxID_ANY, FromUtf8(config_.last_workbook));
-    auto* browse = new wxButton(this, wxID_ANY, "浏览");
-    auto* load = new wxButton(this, wxID_ANY, "读取 Sheet");
+    browse_button_ = new wxButton(this, wxID_ANY, "浏览");
+    load_button_ = new wxButton(this, wxID_ANY, "读取 Sheet");
     file_row->Add(new wxStaticText(this, wxID_ANY, "Excel"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     file_row->Add(workbook_path_, 1, wxRIGHT, 6);
-    file_row->Add(browse, 0, wxRIGHT, 6);
-    file_row->Add(load, 0);
+    file_row->Add(browse_button_, 0, wxRIGHT, 6);
+    file_row->Add(load_button_, 0);
     root->Add(file_row, 0, wxEXPAND | wxALL, 6);
 
     auto* sheet_row = new wxBoxSizer(wxHORIZONTAL);
@@ -121,28 +121,28 @@ CorpusMappingPanel::CorpusMappingPanel(wxWindow* parent, CorpusRunPanel* run_pan
     header_row_ = new wxSpinCtrl(this, wxID_ANY);
     header_row_->SetRange(1, 1000);
     header_row_->SetValue(1);
-    auto* analyze = new wxButton(this, wxID_ANY, "分析列");
-    auto* build = new wxButton(this, wxID_ANY, "生成运行视图");
-    auto* save = new wxButton(this, wxID_ANY, "保存映射");
-    auto* select_all = new wxButton(this, wxID_ANY, "全选");
-    auto* select_none = new wxButton(this, wxID_ANY, "全不选");
+    analyze_button_ = new wxButton(this, wxID_ANY, "分析列");
+    build_button_ = new wxButton(this, wxID_ANY, "生成运行视图");
+    save_button_ = new wxButton(this, wxID_ANY, "保存映射");
+    select_all_button_ = new wxButton(this, wxID_ANY, "全选");
+    select_none_button_ = new wxButton(this, wxID_ANY, "全不选");
     batch_role_ = new wxChoice(this, wxID_ANY);
     batch_role_->Append("忽略");
     batch_role_->Append("参考");
     batch_role_->Append("播放");
     batch_role_->SetSelection(0);
-    auto* apply_role = new wxButton(this, wxID_ANY, "批量用途");
+    apply_role_button_ = new wxButton(this, wxID_ANY, "批量用途");
     sheet_row->Add(new wxStaticText(this, wxID_ANY, "Sheet"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     sheet_row->Add(sheet_choice_, 1, wxRIGHT, 12);
     sheet_row->Add(new wxStaticText(this, wxID_ANY, "表头行"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     sheet_row->Add(header_row_, 0, wxRIGHT, 12);
-    sheet_row->Add(analyze, 0, wxRIGHT, 6);
-    sheet_row->Add(build, 0, wxRIGHT, 6);
-    sheet_row->Add(save, 0, wxRIGHT, 12);
-    sheet_row->Add(select_all, 0, wxRIGHT, 6);
-    sheet_row->Add(select_none, 0, wxRIGHT, 6);
+    sheet_row->Add(analyze_button_, 0, wxRIGHT, 6);
+    sheet_row->Add(build_button_, 0, wxRIGHT, 6);
+    sheet_row->Add(save_button_, 0, wxRIGHT, 12);
+    sheet_row->Add(select_all_button_, 0, wxRIGHT, 6);
+    sheet_row->Add(select_none_button_, 0, wxRIGHT, 6);
     sheet_row->Add(batch_role_, 0, wxRIGHT, 6);
-    sheet_row->Add(apply_role, 0);
+    sheet_row->Add(apply_role_button_, 0);
     root->Add(sheet_row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
     column_grid_ = new wxGrid(this, wxID_ANY);
@@ -156,14 +156,14 @@ CorpusMappingPanel::CorpusMappingPanel(wxWindow* parent, CorpusRunPanel* run_pan
     status_ = new wxStaticText(this, wxID_ANY, "请选择 Excel 并读取 Sheet");
     root->Add(status_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
-    browse->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnBrowse, this);
-    load->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnLoadSheets, this);
-    analyze->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnAnalyze, this);
-    build->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnBuildView, this);
-    save->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnSaveMapping, this);
-    select_all->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnSelectAll, this);
-    select_none->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnSelectNone, this);
-    apply_role->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnApplyRole, this);
+    browse_button_->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnBrowse, this);
+    load_button_->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnLoadSheets, this);
+    analyze_button_->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnAnalyze, this);
+    build_button_->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnBuildView, this);
+    save_button_->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnSaveMapping, this);
+    select_all_button_->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnSelectAll, this);
+    select_none_button_->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnSelectNone, this);
+    apply_role_button_->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnApplyRole, this);
     sheet_choice_->Bind(wxEVT_CHOICE, &CorpusMappingPanel::OnSheetChanged, this);
     column_grid_->Bind(wxEVT_GRID_CELL_CHANGED, &CorpusMappingPanel::OnGridCellChanged, this);
 
@@ -180,22 +180,35 @@ void CorpusMappingPanel::OnBrowse(wxCommandEvent&) {
 }
 
 void CorpusMappingPanel::OnLoadSheets(wxCommandEvent&) {
-    try {
-        sheet_choice_->Clear();
-        const auto sheets = workbook_service_->SheetNames(WorkbookPath());
-        for (const auto& name : sheets) {
-            sheet_choice_->Append(FromUtf8(name));
+    if (busy_) return;
+    const auto path = WorkbookPath();
+    const auto last_sheet = config_.last_sheet;
+    analysis_.reset();
+    FillColumnGrid();
+    SetBusy(true, "读取 Sheet 中");
+    worker_.Submit([this, path, last_sheet] {
+        try {
+            const auto sheets = workbook_service_->SheetNames(path);
+            CallAfter([this, sheets, last_sheet] {
+                sheet_choice_->Clear();
+                for (const auto& name : sheets) {
+                    sheet_choice_->Append(FromUtf8(name));
+                }
+                if (!sheets.empty()) {
+                    const auto selected = last_sheet.empty() ? 0 : sheet_choice_->FindString(FromUtf8(last_sheet));
+                    sheet_choice_->SetSelection(selected == wxNOT_FOUND ? 0 : selected);
+                    wxCommandEvent event;
+                    OnSheetChanged(event);
+                }
+                SetBusy(false, wxString::Format("已读取 %zu 个 Sheet", sheets.size()));
+            });
+        } catch (const std::exception& ex) {
+            const std::string error = ex.what();
+            CallAfter([this, error] {
+                SetBusy(false, FromUtf8(error));
+            });
         }
-        if (!sheets.empty()) {
-            const auto selected = config_.last_sheet.empty() ? 0 : sheet_choice_->FindString(FromUtf8(config_.last_sheet));
-            sheet_choice_->SetSelection(selected == wxNOT_FOUND ? 0 : selected);
-            wxCommandEvent event;
-            OnSheetChanged(event);
-        }
-        status_->SetLabel(wxString::Format("已读取 %zu 个 Sheet", sheets.size()));
-    } catch (const std::exception& ex) {
-        status_->SetLabel(FromUtf8(ex.what()));
-    }
+    });
 }
 
 void CorpusMappingPanel::OnSheetChanged(wxCommandEvent&) {
@@ -210,19 +223,37 @@ void CorpusMappingPanel::OnAnalyze(wxCommandEvent&) {
 }
 
 void CorpusMappingPanel::AnalyzeCurrentSheet() {
-    try {
-        analysis_ = workbook_service_->AnalyzeSheet(WorkbookPath(), SheetName(), static_cast<std::size_t>(header_row_->GetValue()), config_);
-        FillColumnGrid();
-        status_->SetLabel(wxString::Format("已分析：%zu 列，%zu 行", analysis_->columns.size(), analysis_->worksheet.rows.size()));
-    } catch (const std::exception& ex) {
-        status_->SetLabel(FromUtf8(ex.what()));
-    }
+    if (busy_) return;
+    const auto path = WorkbookPath();
+    const auto sheet = SheetName();
+    const auto header_row = static_cast<std::size_t>(header_row_->GetValue());
+    const auto config = config_;
+    analysis_.reset();
+    FillColumnGrid();
+    SetBusy(true, "分析列中");
+    worker_.Submit([this, path, sheet, header_row, config] {
+        try {
+            auto analysis = workbook_service_->AnalyzeSheet(path, sheet, header_row, config);
+            CallAfter([this, analysis = std::move(analysis)]() mutable {
+                analysis_ = std::move(analysis);
+                FillColumnGrid();
+                SetBusy(false, wxString::Format("已分析：%zu 列，%zu 行", analysis_->columns.size(), analysis_->worksheet.rows.size()));
+            });
+        } catch (const std::exception& ex) {
+            const std::string error = ex.what();
+            CallAfter([this, error] {
+                SetBusy(false, FromUtf8(error));
+            });
+        }
+    });
 }
 
 void CorpusMappingPanel::OnBuildView(wxCommandEvent&) {
     try {
-        if (!analysis_) AnalyzeCurrentSheet();
-        if (!analysis_) return;
+        if (!analysis_) {
+            status_->SetLabel("请先分析列");
+            return;
+        }
         CorpusViewService service;
         auto session = service.CreateSession(analysis_->worksheet.rows, SelectedColumnsFromGrid());
         run_panel_->SetSession(std::move(session));
@@ -234,8 +265,10 @@ void CorpusMappingPanel::OnBuildView(wxCommandEvent&) {
 
 void CorpusMappingPanel::OnSaveMapping(wxCommandEvent&) {
     try {
-        if (!analysis_) AnalyzeCurrentSheet();
-        if (!analysis_) return;
+        if (!analysis_) {
+            status_->SetLabel("请先分析列");
+            return;
+        }
         auto columns = analysis_->columns;
         const auto selected = SelectedColumnsFromGrid();
         for (auto& column : columns) {
@@ -306,6 +339,24 @@ void CorpusMappingPanel::LoadModelRegistry() {
     const auto scan = registry.ScanSherpaModelsWithDiagnostics();
     model_entries_ = scan.entries;
     model_invalid_ = scan.invalid;
+}
+
+void CorpusMappingPanel::SetBusy(bool busy, const wxString& message) {
+    busy_ = busy;
+    workbook_path_->Enable(!busy);
+    browse_button_->Enable(!busy);
+    sheet_choice_->Enable(!busy);
+    header_row_->Enable(!busy);
+    load_button_->Enable(!busy);
+    analyze_button_->Enable(!busy);
+    build_button_->Enable(!busy);
+    save_button_->Enable(!busy);
+    select_all_button_->Enable(!busy);
+    select_none_button_->Enable(!busy);
+    batch_role_->Enable(!busy);
+    apply_role_button_->Enable(!busy);
+    column_grid_->Enable(!busy);
+    status_->SetLabel(message);
 }
 
 void CorpusMappingPanel::ConfigureRowEditors(int row) {

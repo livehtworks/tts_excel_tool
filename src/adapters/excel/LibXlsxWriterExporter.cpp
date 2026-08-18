@@ -180,6 +180,18 @@ void LibXlsxWriterExporter::ExportRuntimeView(const RuntimeView& view, const std
 
 void LibXlsxWriterExporter::ExportComparison(const std::vector<CompareRow>& rows, const std::filesystem::path& output) {
 #ifdef ADAYO_HAS_LIBXLSXWRITER
+    ExportComparisonGroups({CompareReportGroup{"", rows}}, output);
+#else
+    (void)rows; (void)output;
+    throw std::runtime_error("当前构建未启用 libxlsxwriter");
+#endif
+}
+
+void LibXlsxWriterExporter::ExportComparisonGroups(const std::vector<CompareReportGroup>& groups, const std::filesystem::path& output) {
+#ifdef ADAYO_HAS_LIBXLSXWRITER
+    if (groups.empty()) {
+        throw std::invalid_argument("对比报告没有可导出的语言组");
+    }
     auto guard = CreateWorkbook(output);
     lxw_worksheet* ws = workbook_add_worksheet(guard.wb, "文本对比");
     if (!ws) throw std::runtime_error("workbook_add_worksheet 失败");
@@ -192,31 +204,41 @@ void LibXlsxWriterExporter::ExportComparison(const std::vector<CompareRow>& rows
     lxw_format* changed = workbook_add_format(guard.wb);
     format_set_font_color(changed, LXW_COLOR_RED);
 
-    const char* headers[] = {"正式文本", "机器文本", "相似度", "结果"};
-    for (lxw_col_t c = 0; c < 4; ++c) Check(worksheet_write_string(ws, 0, c, headers[c], header), "write compare header");
+    std::size_t max_rows = 0;
+    for (const auto& group : groups) {
+        max_rows = (std::max)(max_rows, group.rows.size());
+    }
 
-    for (lxw_row_t r = 0; r < rows.size(); ++r) {
-        const auto& item = rows[r];
-        if (item.reference_index && item.actual_index) {
-            WriteRichFragments(ws, r + 1, 0, item.diff.reference_fragments, changed, wrap);
-            WriteRichFragments(ws, r + 1, 1, item.diff.actual_fragments, changed, wrap);
-        } else {
-            Check(worksheet_write_string(ws, r + 1, 0, item.reference_text.c_str(), wrap), "write reference");
-            Check(worksheet_write_string(ws, r + 1, 1, item.actual_text.c_str(), wrap), "write actual");
+    const char* headers[] = {"正式文本", "机器文本", "相似度", "结果"};
+    for (std::size_t g = 0; g < groups.size(); ++g) {
+        const lxw_col_t base = static_cast<lxw_col_t>(g * 4);
+        const auto prefix = groups[g].label.empty() ? std::string{} : groups[g].label + " ";
+        for (lxw_col_t c = 0; c < 4; ++c) {
+            Check(worksheet_write_string(ws, 0, base + c, (prefix + headers[c]).c_str(), header), "write compare header");
         }
-        Check(worksheet_write_number(ws, r + 1, 2, item.similarity, nullptr), "write similarity");
-        Check(worksheet_write_string(ws, r + 1, 3, StatusText(item.status), nullptr), "write status");
+        for (lxw_row_t r = 0; r < groups[g].rows.size(); ++r) {
+            const auto& item = groups[g].rows[r];
+            if (item.reference_index && item.actual_index) {
+                WriteRichFragments(ws, r + 1, base + 0, item.diff.reference_fragments, changed, wrap);
+                WriteRichFragments(ws, r + 1, base + 1, item.diff.actual_fragments, changed, wrap);
+            } else {
+                Check(worksheet_write_string(ws, r + 1, base + 0, item.reference_text.c_str(), wrap), "write reference");
+                Check(worksheet_write_string(ws, r + 1, base + 1, item.actual_text.c_str(), wrap), "write actual");
+            }
+            Check(worksheet_write_number(ws, r + 1, base + 2, item.similarity, nullptr), "write similarity");
+            Check(worksheet_write_string(ws, r + 1, base + 3, StatusText(item.status), nullptr), "write status");
+        }
+        worksheet_set_column(ws, base + 0, base + 1, 42.0, wrap);
+        worksheet_set_column(ws, base + 2, base + 2, 12.0, nullptr);
+        worksheet_set_column(ws, base + 3, base + 3, 14.0, nullptr);
     }
 
     worksheet_freeze_panes(ws, 1, 0);
-    worksheet_autofilter(ws, 0, 0, static_cast<lxw_row_t>(rows.size()), 3);
-    worksheet_set_column(ws, 0, 1, 42.0, wrap);
-    worksheet_set_column(ws, 2, 2, 12.0, nullptr);
-    worksheet_set_column(ws, 3, 3, 14.0, nullptr);
+    worksheet_autofilter(ws, 0, 0, static_cast<lxw_row_t>(max_rows), static_cast<lxw_col_t>(groups.size() * 4 - 1));
 
     guard.Close();
 #else
-    (void)rows; (void)output;
+    (void)groups; (void)output;
     throw std::runtime_error("当前构建未启用 libxlsxwriter");
 #endif
 }
