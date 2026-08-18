@@ -2,6 +2,8 @@
 #include "core/workbook/ColumnAnalyzer.h"
 #include "core/workbook/ViewBuilder.h"
 #include "persistence/JsonConfigStore.h"
+#include "services/CorpusViewService.h"
+#include "services/WorkbookService.h"
 
 #include <cassert>
 #include <filesystem>
@@ -146,6 +148,58 @@ void TestJsonConfigStoreRoundTrip() {
     std::error_code ec;
     std::filesystem::remove(path, ec);
 }
+
+void TestWorkbookMappingIdentityIncludesHeaderRow() {
+    AppConfig config;
+    SheetMappingConfig row2;
+    row2.workbook_identity = "fixture";
+    row2.sheet_name = "Vehicle";
+    row2.header_row = 2;
+    row2.columns.push_back({0, "A", "序号"});
+
+    SheetMappingConfig row1 = row2;
+    row1.header_row = 1;
+    row1.columns[0].header = "wrong";
+
+    WorkbookService::UpsertMapping(config, row1);
+    WorkbookService::UpsertMapping(config, row2);
+
+    const auto found = WorkbookService::FindMapping(config, "fixture", "Vehicle", 2);
+    assert(found.has_value());
+    assert(found->columns[0].header == "序号");
+    const auto missing = WorkbookService::FindMapping(config, "fixture", "Vehicle", 3);
+    assert(!missing.has_value());
+}
+
+void TestCorpusViewEditAndResultCycle() {
+    OpenXlsxWorkbookReader reader;
+    const auto vehicle = reader.ReadSheet(FixturePath(), "Vehicle", 2);
+
+    ColumnAnalyzer analyzer;
+    const auto profiles = analyzer.Analyze(vehicle.headers, vehicle.rows);
+    std::vector<SelectedColumn> columns = {
+        ToSelected(FindColumn(profiles, "三级功能"), ColumnRole::Reference),
+        ToSelected(FindColumn(profiles, "ENG"), ColumnRole::Play),
+        ToSelected(FindColumn(profiles, "ENU"), ColumnRole::Play),
+    };
+
+    CorpusViewService service;
+    auto session = service.CreateSession(vehicle.rows, columns);
+    assert(session.view.rows.size() == 8);
+
+    service.UpdateDisplayCell(session, 1, 2, "Enable feature A updated");
+    assert(session.source_rows[0][4] == "Turn on feature A\nEnable feature A updated");
+    assert(session.source_rows[0][5] == "Turn on feature A");
+    assert(session.view.rows[0][2] == "Turn on feature A");
+    assert(session.view.rows[1][2] == "Enable feature A updated");
+
+    assert(service.CycleResult(session, 0, 3) == ResultCycleState::Ok);
+    assert(session.view.rows[0][3] == "✔");
+    assert(service.CycleResult(session, 0, 3) == ResultCycleState::Ng);
+    assert(session.view.rows[0][3] == "×");
+    assert(service.CycleResult(session, 0, 3) == ResultCycleState::Blank);
+    assert(session.view.rows[0][3].empty());
+}
 } // namespace
 
 int main() {
@@ -153,6 +207,8 @@ int main() {
     TestWorkbookReadFromChinesePath();
     TestRuntimeViewFromFixture();
     TestJsonConfigStoreRoundTrip();
+    TestWorkbookMappingIdentityIncludesHeaderRow();
+    TestCorpusViewEditAndResultCycle();
     std::cout << "adayo_p2_tests: PASS\n";
     return 0;
 }

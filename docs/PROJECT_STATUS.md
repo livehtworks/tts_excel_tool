@@ -1,6 +1,6 @@
 # Project Status
 
-Current phase: P2 workbook reader and config store verified.
+Current phase: P3 corpus UI verified.
 
 ## Current Architecture
 
@@ -27,6 +27,9 @@ Current phase: P2 workbook reader and config store verified.
 - Column analysis now maps the legacy `ARG` header to Arabic `ar-SA` per the P0 business fixture.
 - JSON config persistence is implemented through `JsonConfigStore`.
 - `windows-release` now runs both `adayo_core_tests` and `adayo_p2_tests`.
+- `WorkbookService` analyzes workbooks and restores mappings by workbook identity + sheet + header row.
+- `CorpusViewService` owns runtime sessions, display edits, and result cycling.
+- wxWidgets corpus UI now has separate mapping and runtime view panels.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
 - Downloaded local candidate sherpa/Piper models:
   - `models/sherpa/vits-piper-en_US-amy-low`
@@ -34,12 +37,12 @@ Current phase: P2 workbook reader and config store verified.
 
 ## Active Work
 
-- Move next to P3 UI wiring so workbook open/header selection/mapping persistence use the verified C++ services.
+- Move next to P4/P5 native TTS and playback integration.
 - Keep sherpa-onnx as a separate pinned native dependency before enabling real TTS.
 
 ## Not Yet Complete
 
-- UI is not yet wired to the OpenXLSX reader/config store.
+- UI audio controls are not yet wired to playback/TTS.
 - libxlsxwriter exporter is not fully wired to a pinned package.
 - sherpa-onnx native TTS is not verified.
 - Local TTS model files exist, but model registry schema and sherpa native runtime are not wired yet.

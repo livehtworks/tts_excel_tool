@@ -29,7 +29,9 @@ add_library(adayo_core STATIC
     src/core/workbook/ViewBuilder.cpp
     src/core/worker/WorkerQueue.cpp
     src/services/CompareService.cpp
+    src/services/CorpusViewService.cpp
     src/services/TtsService.cpp
+    src/services/WorkbookService.cpp
 )
 target_include_directories(adayo_core PUBLIC src)
 
@@ -99,10 +101,18 @@ if(ADAYO_BUILD_DESKTOP)
         src/app/App.cpp
         src/ui/MainFrame.cpp
         src/ui/TtsPanel.cpp
+        src/ui/CorpusMappingPanel.cpp
+        src/ui/CorpusRunPanel.cpp
         src/ui/ComparePanel.cpp
     )
     target_include_directories(AdayoCorpusTool PRIVATE src)
     target_link_libraries(AdayoCorpusTool PRIVATE adayo_core ${wxWidgets_LIBRARIES})
+    if(ADAYO_WITH_OPENXLSX)
+        target_link_libraries(AdayoCorpusTool PRIVATE adayo_excel_reader)
+    endif()
+    if(ADAYO_WITH_JSON_CONFIG)
+        target_link_libraries(AdayoCorpusTool PRIVATE adayo_persistence)
+    endif()
 endif()
 
 if(ADAYO_BUILD_TESTS)
