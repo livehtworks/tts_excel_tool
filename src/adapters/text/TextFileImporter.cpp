@@ -1,18 +1,64 @@
 #include "adapters/text/TextFileImporter.h"
 
+#include "core/unicode/Utf8.h"
+
 #include <fstream>
 #include <stdexcept>
 
 namespace adayo {
 namespace {
-std::string StripUtf8Bom(std::string text) {
-    if (text.size() >= 3 &&
-        static_cast<unsigned char>(text[0]) == 0xEF &&
-        static_cast<unsigned char>(text[1]) == 0xBB &&
-        static_cast<unsigned char>(text[2]) == 0xBF) {
-        text.erase(0, 3);
+std::string DecodeUtf16(std::string_view bytes, bool little_endian) {
+    if (bytes.size() % 2 != 0) {
+        throw std::runtime_error("UTF-16 文本字节数不是偶数");
     }
-    return text;
+    std::u32string out;
+    out.reserve(bytes.size() / 2);
+    auto read_unit = [&](std::size_t offset) {
+        const auto b0 = static_cast<unsigned char>(bytes[offset]);
+        const auto b1 = static_cast<unsigned char>(bytes[offset + 1]);
+        return static_cast<char16_t>(little_endian ? (b0 | (b1 << 8U)) : ((b0 << 8U) | b1));
+    };
+    for (std::size_t i = 0; i < bytes.size(); i += 2) {
+        const char16_t unit = read_unit(i);
+        if (unit >= 0xD800 && unit <= 0xDBFF) {
+            if (i + 3 >= bytes.size()) {
+                throw std::runtime_error("UTF-16 高代理项缺少低代理项");
+            }
+            const char16_t low = read_unit(i + 2);
+            if (low < 0xDC00 || low > 0xDFFF) {
+                throw std::runtime_error("UTF-16 代理项不合法");
+            }
+            const char32_t cp = 0x10000 +
+                ((static_cast<char32_t>(unit - 0xD800) << 10U) | static_cast<char32_t>(low - 0xDC00));
+            out.push_back(cp);
+            i += 2;
+        } else if (unit >= 0xDC00 && unit <= 0xDFFF) {
+            throw std::runtime_error("UTF-16 低代理项缺少高代理项");
+        } else {
+            out.push_back(static_cast<char32_t>(unit));
+        }
+    }
+    return unicode::Encode(out);
+}
+
+std::string DecodeTextByBom(std::string_view content) {
+    if (content.size() >= 3 &&
+        static_cast<unsigned char>(content[0]) == 0xEF &&
+        static_cast<unsigned char>(content[1]) == 0xBB &&
+        static_cast<unsigned char>(content[2]) == 0xBF) {
+        return std::string(content.substr(3));
+    }
+    if (content.size() >= 2 &&
+        static_cast<unsigned char>(content[0]) == 0xFF &&
+        static_cast<unsigned char>(content[1]) == 0xFE) {
+        return DecodeUtf16(content.substr(2), true);
+    }
+    if (content.size() >= 2 &&
+        static_cast<unsigned char>(content[0]) == 0xFE &&
+        static_cast<unsigned char>(content[1]) == 0xFF) {
+        return DecodeUtf16(content.substr(2), false);
+    }
+    return std::string(content);
 }
 
 void TrimLineBoundary(std::string& text) {
@@ -43,7 +89,7 @@ std::vector<std::string> TextFileImporter::ReadUtf8Records(const std::filesystem
 }
 
 std::vector<std::string> TextFileImporter::SplitUtf8Records(std::string_view content, const TextImportOptions& options) {
-    const std::string text = StripUtf8Bom(std::string(content));
+    const std::string text = DecodeTextByBom(content);
     std::vector<std::string> records;
     if (options.delimiter.empty()) {
         std::size_t begin = 0;

@@ -12,7 +12,7 @@ Status: P1 dependency baseline verified for current Windows machine.
 | CMake | 4.4.2 | Tsinghua PyPI mirror, build-tool only | Available for vcpkg |
 | vcpkg registry | `a2b75031b909a2d6b051725c3909230c72d4bd4a` | `https://gitee.com/mirrors/vcpkg.git` | Cloned |
 | vcpkg tool | `2026-07-27-98d7cb0cf1f4686a3e43aa5672b6230c1d56bce8` | Bootstrapped by vcpkg | Available |
-| vcpkg toolchain | `D:/programsoft/tools/vcpkg/scripts/buildsystems/vcpkg.cmake` | Local fixed path | Release build verified |
+| vcpkg toolchain | `$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake` | Environment-selected path | Release build verified |
 
 ## vcpkg Manifest Targets
 
@@ -23,7 +23,7 @@ Status: P1 dependency baseline verified for current Windows machine.
 | utf8proc | 2.11.3 | Installed and linked in release preset |
 | nlohmann-json | 3.12.0#2 | Installed and linked through `adayo_persistence` |
 | openxlsx | 0.5.1 | Installed and linked through `adayo_excel_reader` |
-| libxlsxwriter | 1.2.4#1 | Installed and linked through `adayo_excel_writer` |
+| libxlsxwriter | 1.2.4 overlay port-version 2 | Installed and linked through `adayo_excel_writer` |
 | miniaudio | 0.11.25 | Installed and linked through `adayo_audio_adapter` |
 | sherpa-onnx | v1.13.6 | Official Windows x64 shared MD Release native package linked |
 
@@ -32,6 +32,13 @@ Archive SHA256 details are recorded in:
 `docs/audit/P1_vcpkg_download_hashes.tsv`
 
 ## Release Build Verification
+
+Set:
+
+```powershell
+$env:VCPKG_ROOT = "D:/path/to/vcpkg"
+$env:ADAYO_SHERPA_ONNX_ROOT = "D:/path/to/sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib"
+```
 
 ```cmd
 cmake --fresh --preset windows-release
@@ -55,7 +62,7 @@ App-local DLL smoke includes wxWidgets and utf8proc DLLs copied beside the EXE.
 |---|---|
 | Package | `sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib.tar.bz2` |
 | SHA256 | `DCA033829D3A7E74C127FC0D349A12257FB890FE5038A381AB1706E4B35CF0FA` |
-| Local root | `D:/programsoft/tools/sherpa-onnx/sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib` |
+| Local root | `$env:ADAYO_SHERPA_ONNX_ROOT` |
 | Header SHA256 | `426DB2C6ACFB51E02143AECE67C45779FAE699D961C7C26CCF6F1388FDEAA2DF` |
 
 P4 native TTS verification passed with English and Chinese models.

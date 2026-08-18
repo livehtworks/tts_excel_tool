@@ -22,7 +22,7 @@
       "displayName": "Windows Desktop Release",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/windows-release",
-      "toolchainFile": "D:/programsoft/tools/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "VCPKG_TARGET_TRIPLET": "x64-windows",
@@ -35,7 +35,7 @@
         "ADAYO_WITH_LIBXLSXWRITER": "ON",
         "ADAYO_WITH_JSON_CONFIG": "ON",
         "ADAYO_WITH_SHERPA_ONNX": "ON",
-        "ADAYO_SHERPA_ONNX_ROOT": "D:/programsoft/tools/sherpa-onnx/sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib"
+        "ADAYO_SHERPA_ONNX_ROOT": "$env{ADAYO_SHERPA_ONNX_ROOT}"
       }
     }
   ],

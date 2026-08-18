@@ -6,6 +6,7 @@
 .vs/
 .idea/
 *.user
+CMakeUserPresets.json
 *.suo
 *.VC.db
 *.obj
@@ -14,5 +15,6 @@
 /exports/
 /models/*
 !/models/README.md
+!/models/package-manifest.json
 /config/*.json
 /backup/

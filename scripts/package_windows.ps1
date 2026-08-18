@@ -46,6 +46,61 @@ function Copy-TreeFiltered([string]$SourceDir, [string]$DestinationDir, [string[
     }
 }
 
+function Resolve-ModelDeclaredPath([string]$ModelRoot, [string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return ""
+    }
+    if ([System.IO.Path]::IsPathRooted($Value)) {
+        return [System.IO.Path]::GetFullPath($Value)
+    }
+    return [System.IO.Path]::GetFullPath((Join-Path $ModelRoot $Value))
+}
+
+function Assert-RequiredModelFile([string]$PathValue, [string]$Label, [string]$ModelId) {
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        throw "Model '$ModelId' missing required '$Label' in model.json"
+    }
+    if (-not (Test-Path -LiteralPath $PathValue -PathType Leaf)) {
+        throw "Model '$ModelId' missing required $Label file: $PathValue"
+    }
+}
+
+function Assert-OptionalModelFile([string]$PathValue, [string]$Label, [string]$ModelId) {
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return
+    }
+    if (-not (Test-Path -LiteralPath $PathValue -PathType Leaf)) {
+        throw "Model '$ModelId' missing $Label file: $PathValue"
+    }
+}
+
+function Test-SherpaModelDirectory([string]$ModelRoot, [string]$ExpectedId) {
+    if (-not (Test-Path -LiteralPath $ModelRoot -PathType Container)) {
+        throw "Missing model directory for manifest id '$ExpectedId': $ModelRoot"
+    }
+    $modelJsonPath = Join-Path $ModelRoot "model.json"
+    if (-not (Test-Path -LiteralPath $modelJsonPath -PathType Leaf)) {
+        throw "Missing model.json for manifest id '$ExpectedId': $modelJsonPath"
+    }
+    $modelJson = Get-Content -LiteralPath $modelJsonPath -Encoding UTF8 -Raw | ConvertFrom-Json
+    if ([string]$modelJson.id -ne $ExpectedId) {
+        throw "Model manifest id '$ExpectedId' does not match model.json id '$($modelJson.id)'"
+    }
+    Assert-RequiredModelFile (Resolve-ModelDeclaredPath $ModelRoot ([string]$modelJson.model)) "model" $ExpectedId
+    Assert-RequiredModelFile (Resolve-ModelDeclaredPath $ModelRoot ([string]$modelJson.tokens)) "tokens" $ExpectedId
+    $dataDir = Resolve-ModelDeclaredPath $ModelRoot ([string]$modelJson.data_dir)
+    if (-not [string]::IsNullOrWhiteSpace($dataDir) -and -not (Test-Path -LiteralPath $dataDir -PathType Container)) {
+        throw "Model '$ExpectedId' missing data_dir: $dataDir"
+    }
+    Assert-OptionalModelFile (Resolve-ModelDeclaredPath $ModelRoot ([string]$modelJson.lexicon)) "lexicon" $ExpectedId
+    $ruleFsts = [string]$modelJson.rule_fsts
+    if (-not [string]::IsNullOrWhiteSpace($ruleFsts)) {
+        foreach ($item in $ruleFsts.Split(",")) {
+            Assert-OptionalModelFile (Resolve-ModelDeclaredPath $ModelRoot $item.Trim()) "rule_fsts" $ExpectedId
+        }
+    }
+}
+
 function Find-LatestVcRuntimeDir {
     $redistRoot = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Redist\MSVC"
     if (-not (Test-Path -LiteralPath $redistRoot -PathType Container)) {
@@ -97,11 +152,28 @@ foreach ($runtimeDir in @("logs", "cache", "exports", "config")) {
 $modelsDest = Join-Path $packageDir "models"
 New-Item -ItemType Directory -Force -Path $modelsDest | Out-Null
 Copy-FileRequired (Resolve-RepoPath "models/README.md") $modelsDest
+Copy-FileRequired (Resolve-RepoPath "models/package-manifest.json") $modelsDest
 
 $sherpaDest = Join-Path $modelsDest "sherpa"
-foreach ($voiceDir in @("vits-piper-en_US-amy-low", "vits-piper-zh_CN-xiao_ya-medium-int8")) {
-    $source = Resolve-RepoPath ("models/sherpa/" + $voiceDir)
-    $destination = Join-Path $sherpaDest $voiceDir
+$packageManifestPath = Resolve-RepoPath "models/package-manifest.json"
+if (-not (Test-Path -LiteralPath $packageManifestPath -PathType Leaf)) {
+    throw "Missing model package manifest: $packageManifestPath"
+}
+$packageManifest = Get-Content -LiteralPath $packageManifestPath -Encoding UTF8 -Raw | ConvertFrom-Json
+if ($packageManifest.schema_version -ne 1) {
+    throw "Unsupported model package manifest schema_version: $($packageManifest.schema_version)"
+}
+if (-not $packageManifest.models -or $packageManifest.models.Count -eq 0) {
+    throw "Model package manifest has no models"
+}
+foreach ($model in $packageManifest.models) {
+    $modelId = [string]$model.id
+    if ([string]::IsNullOrWhiteSpace($modelId)) {
+        throw "Model package manifest contains an entry without id"
+    }
+    $source = Resolve-RepoPath ("models/sherpa/" + $modelId)
+    Test-SherpaModelDirectory $source $modelId
+    $destination = Join-Path $sherpaDest $modelId
     Copy-TreeFiltered $source $destination @("\.cache\", "\_download_test\")
 }
 

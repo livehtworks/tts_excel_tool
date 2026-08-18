@@ -38,3 +38,7 @@ Sherpa `model.json` schema:
 Paths are relative to the voice directory unless absolute. `model` and `tokens` are required. `data_dir`, `lexicon`, and `rule_fsts` are optional but must exist when provided.
 
 UI and TTS services must use `ModelRegistry`; language/voice paths must not be hardcoded in UI code.
+
+`package-manifest.json` is the release authority for voice/model packaging. `scripts/package_windows.ps1` copies only the sherpa model ids listed there and validates each local `model.json` plus its declared model, tokens, data, lexicon, and rule FST files.
+
+The package script never downloads models. Add a model to the manifest only after it has been downloaded locally and accepted by real sherpa playback/tests.

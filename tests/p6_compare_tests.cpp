@@ -130,6 +130,26 @@ void TestTextImporterBomAndDelimiter() {
     REQUIRE(records[2] == "مرحبا");
 }
 
+void TestTextImporterUtf16Bom() {
+    std::string utf16le;
+    for (unsigned char c : {0xFF, 0xFE, 0x2D, 0x4E, 0x87, 0x65, 0x0A, 0x00, 0x41, 0x00}) {
+        utf16le.push_back(static_cast<char>(c));
+    }
+    auto records = TextFileImporter::SplitUtf8Records(utf16le);
+    REQUIRE(records.size() == 2);
+    REQUIRE(records[0] == "中文");
+    REQUIRE(records[1] == "A");
+
+    std::string utf16be;
+    for (unsigned char c : {0xFE, 0xFF, 0x4E, 0x2D, 0x65, 0x87, 0x00, 0x0A, 0x00, 0x42}) {
+        utf16be.push_back(static_cast<char>(c));
+    }
+    records = TextFileImporter::SplitUtf8Records(utf16be);
+    REQUIRE(records.size() == 2);
+    REQUIRE(records[0] == "中文");
+    REQUIRE(records[1] == "B");
+}
+
 void TestPerformance1000() {
     CompareService service;
     CompareOptions options;
@@ -159,6 +179,7 @@ int main() {
         TestPunctuationSwitch();
         TestUnicodePunctuationWithUtf8proc();
         TestTextImporterBomAndDelimiter();
+        TestTextImporterUtf16Bom();
         TestPerformance1000();
     });
 }

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "models": [
+    {
+      "id": "vits-piper-en_US-amy-low"
+    },
+    {
+      "id": "vits-piper-zh_CN-xiao_ya-medium-int8"
+    }
+  ]
+}

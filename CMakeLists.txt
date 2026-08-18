@@ -20,6 +20,26 @@ option(ADAYO_WITH_LIBXLSXWRITER "Enable libxlsxwriter exporter" OFF)
 option(ADAYO_WITH_JSON_CONFIG "Enable nlohmann-json config store" OFF)
 set(ADAYO_SHERPA_ONNX_ROOT "" CACHE PATH "Root directory of a pinned sherpa-onnx native package")
 
+if(ADAYO_BUILD_DESKTOP)
+    set(ADAYO_DESKTOP_REQUIRED_OPTIONS
+        ADAYO_WITH_RAPIDFUZZ
+        ADAYO_WITH_UTF8PROC
+        ADAYO_WITH_SHERPA_ONNX
+        ADAYO_WITH_MINIAUDIO
+        ADAYO_WITH_OPENXLSX
+        ADAYO_WITH_LIBXLSXWRITER
+        ADAYO_WITH_JSON_CONFIG
+    )
+    foreach(required_option IN LISTS ADAYO_DESKTOP_REQUIRED_OPTIONS)
+        if(NOT ${required_option})
+            message(FATAL_ERROR "ADAYO_BUILD_DESKTOP=ON requires ${required_option}=ON for the supported desktop application")
+        endif()
+    endforeach()
+    if(NOT ADAYO_SHERPA_ONNX_ROOT)
+        message(FATAL_ERROR "ADAYO_BUILD_DESKTOP=ON requires ADAYO_SHERPA_ONNX_ROOT. Set the ADAYO_SHERPA_ONNX_ROOT environment/cache variable to the pinned sherpa-onnx native package root.")
+    endif()
+endif()
+
 add_library(adayo_core STATIC
     src/core/unicode/Utf8.cpp
     src/core/compare/TextNormalizer.cpp

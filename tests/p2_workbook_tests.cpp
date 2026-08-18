@@ -168,6 +168,67 @@ void TestJsonConfigStoreRoundTrip() {
     std::filesystem::remove(path, ec);
 }
 
+void TestJsonConfigCorruptBackupAndSafeSave() {
+    const auto dir = std::filesystem::temp_directory_path() / "adayo_config_store_corrupt_test";
+    const auto path = dir / "config.json";
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << R"({"schema_version":2,"last_workbook":)";
+    }
+
+    JsonConfigStore store(path);
+    const auto loaded = store.LoadOrDefault();
+    REQUIRE(loaded.status == ConfigLoadStatus::CorruptBackedUp);
+    REQUIRE(loaded.backup_path.has_value());
+    REQUIRE(std::filesystem::exists(*loaded.backup_path));
+    REQUIRE(!std::filesystem::exists(path));
+    REQUIRE(loaded.allow_save);
+
+    AppConfig config;
+    config.last_workbook = "after_corrupt.xlsx";
+    store.Save(config);
+    const auto saved = store.Load();
+    REQUIRE(saved.last_workbook == "after_corrupt.xlsx");
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+void TestJsonConfigFutureSchemaRefusesOverwrite() {
+    const auto dir = std::filesystem::temp_directory_path() / "adayo_config_store_future_test";
+    const auto path = dir / "config.json";
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << R"({"schema_version":999,"last_workbook":"future.xlsx"})";
+    }
+
+    JsonConfigStore store(path);
+    const auto loaded = store.LoadOrDefault();
+    REQUIRE(loaded.status == ConfigLoadStatus::FutureSchema);
+    REQUIRE(!loaded.allow_save);
+
+    bool threw = false;
+    try {
+        AppConfig config;
+        config.last_workbook = "must_not_overwrite.xlsx";
+        store.Save(config);
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    REQUIRE(threw);
+    {
+        std::ifstream input(path, std::ios::binary);
+        std::string content((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+        REQUIRE(content.find("future.xlsx") != std::string::npos);
+        REQUIRE(content.find("must_not_overwrite") == std::string::npos);
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
 void TestJsonConfigV1LanguageMigrationDoesNotOverrideAnalyzer() {
     const auto path = std::filesystem::temp_directory_path() / "adayo_config_store_test" / "config_v1.json";
     std::filesystem::create_directories(path.parent_path());
@@ -403,6 +464,8 @@ int main() {
         TestWorkbookReadFromChinesePath();
         TestRuntimeViewFromFixture();
         TestJsonConfigStoreRoundTrip();
+        TestJsonConfigCorruptBackupAndSafeSave();
+        TestJsonConfigFutureSchemaRefusesOverwrite();
         TestJsonConfigV1LanguageMigrationDoesNotOverrideAnalyzer();
         TestWorkbookMappingIdentityIncludesHeaderRow();
         TestWorkbookIdentityIgnoresContentVersion();

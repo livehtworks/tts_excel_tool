@@ -1,10 +1,20 @@
 #include "persistence/JsonConfigStore.h"
 
+#include <chrono>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
 #include <nlohmann/json.hpp>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace adayo {
 using nlohmann::json;
@@ -12,6 +22,68 @@ using nlohmann::json;
 namespace {
 constexpr int kCurrentSchemaVersion = 2;
 
+class FutureSchemaError final : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+std::string PathUtf8(const std::filesystem::path& path) {
+    const auto u8 = path.u8string();
+    return {u8.begin(), u8.end()};
+}
+
+std::string Timestamp() {
+    const auto now = std::chrono::system_clock::now();
+    const auto tt = std::chrono::system_clock::to_time_t(now);
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &tt);
+#else
+    localtime_r(&tt, &tm);
+#endif
+    std::ostringstream out;
+    out << std::put_time(&tm, "%Y%m%d-%H%M%S");
+    return out.str();
+}
+
+std::filesystem::path CorruptBackupPath(const std::filesystem::path& path) {
+    auto candidate = path;
+    candidate += ".corrupt-" + Timestamp();
+    int suffix = 1;
+    while (std::filesystem::exists(candidate)) {
+        candidate = path;
+        candidate += ".corrupt-" + Timestamp() + "-" + std::to_string(suffix++);
+    }
+    return candidate;
+}
+
+void AtomicReplace(const std::filesystem::path& temp, const std::filesystem::path& final) {
+#ifdef _WIN32
+    if (!MoveFileExW(temp.wstring().c_str(), final.wstring().c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        throw std::runtime_error("原子替换配置失败: " + std::to_string(GetLastError()));
+    }
+#else
+    std::filesystem::rename(temp, final);
+#endif
+}
+
+void RejectUnsafeExistingTarget(const std::filesystem::path& path) {
+    if (!std::filesystem::exists(path)) return;
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        throw std::runtime_error("无法读取现有配置文件，拒绝覆盖: " + PathUtf8(path));
+    }
+    json document;
+    try {
+        input >> document;
+    } catch (const std::exception& ex) {
+        throw std::runtime_error("现有配置文件损坏，拒绝覆盖，请先备份或让程序完成 corrupt 备份: " + std::string(ex.what()));
+    }
+    const int schema_version = document.value("schema_version", 1);
+    if (schema_version > kCurrentSchemaVersion) {
+        throw FutureSchemaError("配置 schema_version 来自未来版本，拒绝覆盖");
+    }
+}
 
 std::string ToString(ColumnRole role) {
     switch (role) {
@@ -130,7 +202,7 @@ void to_json(json& j, const AppConfig& config) {
 void from_json(const json& j, AppConfig& config) {
     const int schema_version = j.value("schema_version", 1);
     if (schema_version > kCurrentSchemaVersion) {
-        throw std::runtime_error("配置 schema_version 来自未来版本，拒绝读取");
+        throw FutureSchemaError("配置 schema_version 来自未来版本，拒绝读取");
     }
     config.schema_version = kCurrentSchemaVersion;
     config.last_workbook = j.value("last_workbook", std::string{});
@@ -166,18 +238,58 @@ AppConfig JsonConfigStore::Load() const {
     return document.get<AppConfig>();
 }
 
+ConfigLoadResult JsonConfigStore::LoadOrDefault() const {
+    ConfigLoadResult result;
+    if (!std::filesystem::exists(path_)) {
+        result.status = ConfigLoadStatus::Missing;
+        return result;
+    }
+    try {
+        result.config = Load();
+        result.status = ConfigLoadStatus::Loaded;
+        return result;
+    } catch (const FutureSchemaError& ex) {
+        result.status = ConfigLoadStatus::FutureSchema;
+        result.allow_save = false;
+        result.message = ex.what();
+        return result;
+    } catch (const std::exception& ex) {
+        const auto backup = CorruptBackupPath(path_);
+        std::filesystem::rename(path_, backup);
+        result.status = ConfigLoadStatus::CorruptBackedUp;
+        result.backup_path = backup;
+        result.message = "配置文件损坏，已备份为 " + PathUtf8(backup) + "；本次使用默认配置: " + ex.what();
+        return result;
+    }
+}
+
 void JsonConfigStore::Save(const AppConfig& config) const {
     if (path_.has_parent_path()) {
         std::filesystem::create_directories(path_.parent_path());
     }
-
-    std::ofstream output(path_, std::ios::binary | std::ios::trunc);
-    if (!output) {
-        throw std::runtime_error("无法写入配置文件");
-    }
+    RejectUnsafeExistingTarget(path_);
 
     json document = config;
-    output << document.dump(2);
+    auto temp = path_;
+    temp += ".tmp-" + Timestamp();
+    try {
+        {
+            std::ofstream output(temp, std::ios::binary | std::ios::trunc);
+            if (!output) {
+                throw std::runtime_error("无法写入配置临时文件");
+            }
+            output << document.dump(2);
+            output.flush();
+            if (!output) {
+                throw std::runtime_error("配置临时文件 flush 失败");
+            }
+        }
+        AtomicReplace(temp, path_);
+    } catch (...) {
+        std::error_code ec;
+        std::filesystem::remove(temp, ec);
+        throw;
+    }
 }
 
 } // namespace adayo

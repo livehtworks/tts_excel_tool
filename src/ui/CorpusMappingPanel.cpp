@@ -97,11 +97,10 @@ CorpusMappingPanel::CorpusMappingPanel(wxWindow* parent, CorpusRunPanel* run_pan
       workbook_service_(std::make_unique<WorkbookService>(std::make_unique<OpenXlsxWorkbookReader>())),
       config_store_(ConfigPath()) {
 
-    try {
-        config_ = config_store_.Load();
-    } catch (...) {
-        config_ = {};
-    }
+    const auto config_load = config_store_.LoadOrDefault();
+    config_ = config_load.config;
+    config_save_allowed_ = config_load.allow_save;
+    initial_config_warning_ = config_load.message;
     LoadModelRegistry();
 
     auto* root = new wxBoxSizer(wxVERTICAL);
@@ -153,7 +152,8 @@ CorpusMappingPanel::CorpusMappingPanel(wxWindow* parent, CorpusRunPanel* run_pan
     }
     root->Add(column_grid_, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
-    status_ = new wxStaticText(this, wxID_ANY, "请选择 Excel 并读取 Sheet");
+    status_ = new wxStaticText(this, wxID_ANY,
+        initial_config_warning_.empty() ? wxString::FromUTF8("请选择 Excel 并读取 Sheet") : FromUtf8(initial_config_warning_));
     root->Add(status_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
     browse_button_->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnBrowse, this);
@@ -265,6 +265,10 @@ void CorpusMappingPanel::OnBuildView(wxCommandEvent&) {
 
 void CorpusMappingPanel::OnSaveMapping(wxCommandEvent&) {
     try {
+        if (!config_save_allowed_) {
+            status_->SetLabel("当前配置来自未来 schema，拒绝覆盖保存");
+            return;
+        }
         if (!analysis_) {
             status_->SetLabel("请先分析列");
             return;

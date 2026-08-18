@@ -50,8 +50,14 @@ Current phase: P9 acceptance revoked pending remediation R0-R6.
 - R3 re-ran sherpa acceptance under always-on checks: speed sample-count ordering, 20 EN/ZH model switches, 500 English generations, and 500 Chinese generations.
 - R4 replaced Compare UI's single-pair flow with multi-language input groups and a matching report grid/export format where each group owns four columns.
 - R4 moved UTF-8 BOM/fixed-delimiter text import into `TextFileImporter` and tests it directly.
+- R4 text import now also supports UTF-16LE/BE BOM input and converts records to UTF-8 before comparison.
 - R4 uses utf8proc Unicode punctuation categories in release builds, including Arabic punctuation coverage.
 - R4 moved Compare work, Compare export, runtime Excel export, and workbook sheet/analyze operations off the wx UI thread through `WorkerQueue`.
+- R5 made JSON config load/save safer: corrupt files are renamed to `.corrupt-*`, future schema files are not overwritten, and normal saves use same-directory temp files plus atomic replacement.
+- R5 removed personal absolute dependency roots from shared CMake presets. `windows-release` now reads `VCPKG_ROOT` and `ADAYO_SHERPA_ONNX_ROOT`.
+- R5 makes desktop application dependencies mandatory when `ADAYO_BUILD_DESKTOP=ON`.
+- R5 added a vcpkg overlay port for `libxlsxwriter@1.2.4#2` so third-party headers are installed reproducibly.
+- R5 added `models/package-manifest.json`; packaging copies and validates only listed local sherpa model ids.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
 - Downloaded local candidate sherpa/Piper models:
   - `models/sherpa/vits-piper-en_US-amy-low`
@@ -59,7 +65,7 @@ Current phase: P9 acceptance revoked pending remediation R0-R6.
 
 ## Active Work
 
-- Execute remediation checklist R0-R6 in order; R5 is next.
+- Execute remediation checklist R0-R6 in order; R6 is next.
 
 ## Not Yet Complete
 

@@ -37,7 +37,7 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 
 - vcpkg reads Windows IE/system proxy settings and auto-sets `HTTP(S)_PROXY` to `127.0.0.1:7897`.
 - The user explicitly allowed proxy usage for C++ dependency installation. Keep model/voice downloads on domestic mirrors and avoid proxy for large model files.
-- Use the fixed vcpkg toolchain path in presets: `D:/programsoft/tools/vcpkg/scripts/buildsystems/vcpkg.cmake`.
+- Shared presets read `VCPKG_ROOT` and `ADAYO_SHERPA_ONNX_ROOT` from the environment. This machine's local values live only in ignored `CMakeUserPresets.json`.
 
 ## OpenXLSX
 
@@ -46,14 +46,7 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 
 ## libxlsxwriter
 
-- The tested vcpkg `libxlsxwriter@1.2.4#1` installation omitted headers under `third_party/` required by `xlsxwriter/common.h`.
-- Local repair used the same vcpkg buildtree source:
-
-```powershell
-Copy-Item -Path D:\programsoft\tools\vcpkg\buildtrees\libxlsxwriter\src\v1.2.4-e41530bd32.clean\include\xlsxwriter\third_party\* `
-  -Destination build\windows-release\vcpkg_installed\x64-windows\include\third_party -Force
-```
-
+- The repository provides `vcpkg-ports/libxlsxwriter` as an overlay port for libxlsxwriter 1.2.4. It automatically installs the `include/third_party` headers required by `xlsxwriter/common.h`.
 - `LibXlsxWriterExporter` stages non-ASCII output paths through `%TEMP%\adayo_xlsxwriter` before copying to the requested path.
 
 ## Model Downloads
@@ -74,5 +67,5 @@ Copy-Item -Path D:\programsoft\tools\vcpkg\buildtrees\libxlsxwriter\src\v1.2.4-e
 
 - Use `scripts/package_windows.ps1` after building the `windows-release` preset.
 - The packaging script refuses to overwrite an existing timestamped package directory or ZIP.
-- Packaging copies only accepted sherpa models; failed/candidate model directories remain local development artifacts.
+- Packaging copies only accepted sherpa models listed in `models/package-manifest.json`; failed/candidate model directories remain local development artifacts.
 - Release ZIPs are generated under workspace `dist/` by default, not on the desktop.

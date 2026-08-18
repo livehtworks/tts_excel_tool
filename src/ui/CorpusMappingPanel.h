@@ -54,6 +54,8 @@ private:
     std::unique_ptr<WorkbookService> workbook_service_;
     JsonConfigStore config_store_;
     AppConfig config_;
+    bool config_save_allowed_{true};
+    std::string initial_config_warning_;
     std::optional<WorkbookAnalysis> analysis_;
     std::vector<TtsModelEntry> model_entries_;
     std::vector<TtsModelDiagnostic> model_invalid_;

@@ -7,5 +7,6 @@
 - rapidfuzz-cpp：只放在 `TextSimilarity` 后面，不泄漏到业务层。
 - utf8proc：正式构建用于 NFKC/casefold/category；seed fallback 只为 Core 无依赖验证。
 - libxlsxwriter：只负责写；字符级标红使用 rich string。
+- libxlsxwriter：使用仓库 `vcpkg-ports/libxlsxwriter` overlay port，自动补齐安装包缺失的 `include/third_party` headers；不得再要求手工从 vcpkg buildtree 复制。
 - sherpa-onnx：固定验证版本，C API 全部隔离在 adapter；必须做重复推理稳定性压测。
 - miniaudio：只负责音频设备/PCM 播放，不承载业务播放队列。

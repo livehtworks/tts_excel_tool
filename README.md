@@ -11,7 +11,7 @@
 - MOSS-TTS-Nano 保留独立 adapter 边界，但在官方 ONNX 推理序列完成 C++ 等价验证前禁止假实现
 - 文本比对全程按 Unicode code point，不允许在 UTF-8 byte 上做 Levenshtein/Diff
 - Excel 输入与输出解耦：OpenXLSX reader / libxlsxwriter writer
-- 单一受控 WorkerQueue，GUI 线程不做模型加载、TTS 推理、批量对齐、Excel 大文件 IO
+- 最多两条受控串行 WorkerQueue：PlaybackService 专用播放队列，以及桌面 IO/Compare/Export 后台队列；GUI 线程不做模型加载、TTS 推理、批量对齐、Excel 大文件 IO
 
 ## 本种子已实现并可独立验证的核心
 
@@ -38,6 +38,25 @@ ctest --test-dir build --output-on-failure
 ```
 
 这个步骤不需要 wxWidgets / sherpa-onnx / OpenXLSX / libxlsxwriter。
+
+## Windows 桌面发布构建
+
+共享 `windows-release` preset 不包含个人机器绝对路径。先设置两个环境变量：
+
+```powershell
+$env:VCPKG_ROOT = "D:/path/to/vcpkg"
+$env:ADAYO_SHERPA_ONNX_ROOT = "D:/path/to/sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib"
+```
+
+然后构建：
+
+```cmd
+cmake --preset windows-release
+cmake --build --preset windows-release
+ctest --preset windows-release --output-on-failure
+```
+
+`ADAYO_BUILD_DESKTOP=ON` 是正式应用构建，必须同时启用 OpenXLSX、libxlsxwriter、nlohmann-json、utf8proc、rapidfuzz、miniaudio、sherpa-onnx。libxlsxwriter 使用仓库内 `vcpkg-ports/libxlsxwriter` overlay port 修补安装头文件，不需要手工进入 vcpkg buildtree 复制文件。
 
 ## 禁止把旧实现带回来
 
