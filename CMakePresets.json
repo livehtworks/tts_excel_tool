@@ -22,7 +22,7 @@
       "displayName": "Windows Desktop Release",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/windows-release",
-      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "toolchainFile": "D:/programsoft/tools/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "VCPKG_TARGET_TRIPLET": "x64-windows",

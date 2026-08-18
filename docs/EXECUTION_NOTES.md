@@ -34,7 +34,9 @@ $env:GIT_CONFIG_GLOBAL='NUL'
 $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 ```
 
-- Current blocker: vcpkg still reads Windows IE/system proxy settings and auto-sets `HTTP(S)_PROXY` to `127.0.0.1:7897`. Do not run real vcpkg installs through that path unless the user explicitly permits proxy usage or disables the system proxy.
+- vcpkg reads Windows IE/system proxy settings and auto-sets `HTTP(S)_PROXY` to `127.0.0.1:7897`.
+- The user explicitly allowed proxy usage for C++ dependency installation. Keep model/voice downloads on domestic mirrors and avoid proxy for large model files.
+- Use the fixed vcpkg toolchain path in presets: `D:/programsoft/tools/vcpkg/scripts/buildsystems/vcpkg.cmake`.
 
 ## Model Downloads
 

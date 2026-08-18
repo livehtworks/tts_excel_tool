@@ -19,6 +19,9 @@ Current phase: P1 Windows build and dependency baseline.
 - Core tests pass with MSVC 19.44.35225.0 via `build-core`.
 - `windows-core` CMake preset builds and tests successfully.
 - vcpkg manifest dry-run resolves dependencies with wxWidgets locked to 3.2.8.1.
+- vcpkg dependency install completed after user allowed proxy use for C++ dependencies.
+- `windows-release` preset builds `AdayoCorpusTool.exe` and passes core tests.
+- Release EXE starts in both normal build directory and copied Chinese path directory.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
 - Downloaded local candidate sherpa/Piper models:
   - `models/sherpa/vits-piper-en_US-amy-low`
@@ -27,14 +30,11 @@ Current phase: P1 Windows build and dependency baseline.
 ## Active Work
 
 - Establish pinned Windows dependency baseline with vcpkg.
-- Resolve vcpkg's automatic use of Windows IE/system proxy before running real dependency installation.
-- Verify `windows-release` CMake preset after dependencies are installed.
+- Continue to P2 workbook reader/config store work once P1 is committed.
 - Keep sherpa-onnx as a separate pinned native dependency before enabling real TTS.
 
 ## Not Yet Complete
 
-- wxWidgets desktop build is not yet verified.
-- vcpkg install is not run because vcpkg auto-detects `127.0.0.1:7897` from system proxy settings despite cleared process proxy variables.
 - OpenXLSX reader is not implemented.
 - libxlsxwriter exporter is not fully wired to a pinned package.
 - sherpa-onnx native TTS is not verified.

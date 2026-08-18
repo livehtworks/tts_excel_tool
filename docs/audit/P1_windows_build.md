@@ -20,6 +20,12 @@ Date: 2026-08-18
 - MSVC compiler during configure: `MSVC 19.44.35225.0`
 - Core configure/build/test passes after adding MSVC `/utf-8`.
 - `CMakePresets.json` `windows-core` configure/build/test passes.
+- `CMakePresets.json` `windows-release` configure/build/test passes with the fixed vcpkg toolchain path `D:/programsoft/tools/vcpkg/scripts/buildsystems/vcpkg.cmake`.
+- wxWidgets found by CMake: `3.2.8.1`.
+- `AdayoCorpusTool.exe` was generated at `build/windows-release/AdayoCorpusTool.exe`.
+- GUI smoke: release EXE started and stayed alive for 5 seconds.
+- Chinese path smoke: copied release EXE + app-local DLLs to `build/中文路径启动验证`; EXE started and stayed alive for 5 seconds.
+- Downloaded vcpkg source/tool archive SHA256 list: `docs/audit/P1_vcpkg_download_hashes.tsv`.
 
 Command:
 
@@ -28,6 +34,17 @@ call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDe
 cmake -S . -B build-core -G Ninja -DADAYO_BUILD_DESKTOP=OFF -DADAYO_BUILD_TESTS=ON
 cmake --build build-core
 ctest --test-dir build-core --output-on-failure
+```
+
+Result: `1/1 Test #1: adayo_core_tests Passed`.
+
+Windows release command:
+
+```cmd
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" -arch=x64
+cmake --fresh --preset windows-release
+cmake --build --preset windows-release
+ctest --preset windows-release
 ```
 
 Result: `1/1 Test #1: adayo_core_tests Passed`.
@@ -52,12 +69,14 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 
 Dry-run result: dependency graph resolves and includes `wxwidgets[core,debug-support,sound]:x64-windows@3.2.8.1`.
 
+Real install/build result: dependency installation completed, then `windows-release` built successfully. The user explicitly allowed proxy use for C++ dependencies after the initial no-proxy attempt was blocked by vcpkg/system proxy behavior.
+
 ## Blocked / Unverified
 
-- `windows-release` preset is not yet verified because vcpkg dependencies have not been installed.
-- Even after clearing process proxy variables and ignoring Git global proxy config, vcpkg prints `Automatically setting %HTTP(S)_PROXY% environment variables to "127.0.0.1:7897"` from Windows IE/system proxy settings. Per the user request, real vcpkg install was not run through that proxy path.
-- wxWidgets empty shell EXE has not yet been launched.
-- No dependency lock SHA256 values have been recorded yet for vcpkg-built packages.
+- SHA256 is recorded for downloaded vcpkg source/tool archives present in the local caches, excluding the known partial `cmake-4.4.0-windows-x86_64.zip` from an abandoned manual download attempt.
+- Release bundle packaging is not complete; P9 still owns final install/package layout.
+- OpenXLSX/libxlsxwriter/miniaudio are installed but their adapters are not fully implemented or enabled in this release preset yet.
+- sherpa-onnx is not installed or linked yet.
 
 ## Forbidden-Scope Check
 
