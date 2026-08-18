@@ -2,7 +2,7 @@ param(
     [string]$BuildDir = "build/windows-release",
     [string]$OutputRoot = "dist",
     [string]$PackageName = "",
-    [string]$DesktopZipPath = "",
+    [string]$ZipPath = "",
     [switch]$NoZip
 )
 
@@ -138,15 +138,14 @@ Set-Content -LiteralPath $manifestPath -Encoding UTF8 -Value @(
 
 $zipPath = $null
 if (-not $NoZip) {
-    if ([string]::IsNullOrWhiteSpace($DesktopZipPath)) {
-        $desktop = Join-Path $env:USERPROFILE "Desktop"
-        $DesktopZipPath = Join-Path $desktop ($PackageName + ".zip")
+    if ([string]::IsNullOrWhiteSpace($ZipPath)) {
+        $ZipPath = Join-Path $outputRootPath ($PackageName + ".zip")
     }
-    if (Test-Path -LiteralPath $DesktopZipPath) {
-        throw "ZIP already exists, refusing to overwrite: $DesktopZipPath"
+    if (Test-Path -LiteralPath $ZipPath) {
+        throw "ZIP already exists, refusing to overwrite: $ZipPath"
     }
-    Compress-Archive -LiteralPath $packageDir -DestinationPath $DesktopZipPath -CompressionLevel Optimal
-    $zipPath = [System.IO.Path]::GetFullPath($DesktopZipPath)
+    Compress-Archive -LiteralPath $packageDir -DestinationPath $ZipPath -CompressionLevel Optimal
+    $zipPath = [System.IO.Path]::GetFullPath($ZipPath)
 }
 
 [pscustomobject]@{

@@ -75,3 +75,4 @@ Copy-Item -Path D:\programsoft\tools\vcpkg\buildtrees\libxlsxwriter\src\v1.2.4-e
 - Use `scripts/package_windows.ps1` after building the `windows-release` preset.
 - The packaging script refuses to overwrite an existing timestamped package directory or ZIP.
 - Packaging copies only accepted sherpa models; failed/candidate model directories remain local development artifacts.
+- Release ZIPs are generated under workspace `dist/` by default, not on the desktop.
