@@ -25,6 +25,7 @@ call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDe
 
 - vcpkg was cloned from `https://gitee.com/mirrors/vcpkg.git`.
 - vcpkg package dry-run resolves the intended manifest, including `wxwidgets@3.2.8.1`.
+- Enabling OpenXLSX pulls a large Boost header/component chain through vcpkg; initial install can run for several minutes.
 - Clear proxy variables before dependency commands:
 
 ```powershell
@@ -37,6 +38,11 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 - vcpkg reads Windows IE/system proxy settings and auto-sets `HTTP(S)_PROXY` to `127.0.0.1:7897`.
 - The user explicitly allowed proxy usage for C++ dependency installation. Keep model/voice downloads on domestic mirrors and avoid proxy for large model files.
 - Use the fixed vcpkg toolchain path in presets: `D:/programsoft/tools/vcpkg/scripts/buildsystems/vcpkg.cmake`.
+
+## OpenXLSX
+
+- OpenXLSX 0.5.1 only exposes `XLDocument::open(const std::string&)` in the tested package.
+- `OpenXlsxWorkbookReader` stages non-ASCII workbook paths through `%TEMP%\adayo_openxlsx` before reading. Keep Chinese path coverage in `adayo_p2_tests`.
 
 ## Model Downloads
 

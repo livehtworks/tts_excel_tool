@@ -31,8 +31,9 @@
         "ADAYO_WITH_RAPIDFUZZ": "ON",
         "ADAYO_WITH_UTF8PROC": "ON",
         "ADAYO_WITH_MINIAUDIO": "OFF",
-        "ADAYO_WITH_OPENXLSX": "OFF",
+        "ADAYO_WITH_OPENXLSX": "ON",
         "ADAYO_WITH_LIBXLSXWRITER": "OFF",
+        "ADAYO_WITH_JSON_CONFIG": "ON",
         "ADAYO_WITH_SHERPA_ONNX": "OFF"
       }
     }

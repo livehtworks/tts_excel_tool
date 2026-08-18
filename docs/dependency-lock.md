@@ -21,7 +21,8 @@ Status: P1 dependency baseline verified for current Windows machine.
 | wxwidgets | 3.2.8.1 | Installed and linked |
 | rapidfuzz-cpp | 3.3.3 | Installed and linked in release preset |
 | utf8proc | 2.11.3 | Installed and linked in release preset |
-| openxlsx | 0.5.1 | Installed; adapter not enabled yet |
+| nlohmann-json | 3.12.0#2 | Installed and linked through `adayo_persistence` |
+| openxlsx | 0.5.1 | Installed and linked through `adayo_excel_reader` |
 | libxlsxwriter | 1.2.4#1 | Installed; adapter not enabled yet |
 | miniaudio | 0.11.25 | Installed; adapter not enabled yet |
 
@@ -37,7 +38,7 @@ cmake --build --preset windows-release
 ctest --preset windows-release
 ```
 
-Result: `1/1 adayo_core_tests PASS`.
+Result after P2: `2/2 adayo_core_tests, adayo_p2_tests PASS`.
 
 Generated EXE:
 

@@ -17,6 +17,7 @@ option(ADAYO_WITH_SHERPA_ONNX "Enable native sherpa-onnx TTS adapter" OFF)
 option(ADAYO_WITH_MINIAUDIO "Enable miniaudio playback adapter" OFF)
 option(ADAYO_WITH_OPENXLSX "Enable OpenXLSX workbook reader" OFF)
 option(ADAYO_WITH_LIBXLSXWRITER "Enable libxlsxwriter exporter" OFF)
+option(ADAYO_WITH_JSON_CONFIG "Enable nlohmann-json config store" OFF)
 
 add_library(adayo_core STATIC
     src/core/unicode/Utf8.cpp
@@ -74,6 +75,14 @@ if(ADAYO_WITH_OPENXLSX)
     target_compile_definitions(adayo_excel_reader PUBLIC ADAYO_HAS_OPENXLSX=1)
 endif()
 
+if(ADAYO_WITH_JSON_CONFIG)
+    find_package(nlohmann_json CONFIG REQUIRED)
+    add_library(adayo_persistence STATIC src/persistence/JsonConfigStore.cpp)
+    target_include_directories(adayo_persistence PUBLIC src)
+    target_link_libraries(adayo_persistence PUBLIC adayo_core nlohmann_json::nlohmann_json)
+    target_compile_definitions(adayo_persistence PUBLIC ADAYO_HAS_JSON_CONFIG=1)
+endif()
+
 if(ADAYO_WITH_LIBXLSXWRITER)
     add_library(adayo_excel_writer STATIC src/adapters/excel/LibXlsxWriterExporter.cpp)
     target_include_directories(adayo_excel_writer PUBLIC src)
@@ -101,4 +110,12 @@ if(ADAYO_BUILD_TESTS)
     add_executable(adayo_core_tests tests/core_tests.cpp)
     target_link_libraries(adayo_core_tests PRIVATE adayo_core)
     add_test(NAME adayo_core_tests COMMAND adayo_core_tests)
+
+    if(ADAYO_WITH_OPENXLSX AND ADAYO_WITH_JSON_CONFIG)
+        add_executable(adayo_p2_tests tests/p2_workbook_tests.cpp)
+        target_link_libraries(adayo_p2_tests PRIVATE adayo_core adayo_excel_reader adayo_persistence)
+        target_compile_definitions(adayo_p2_tests PRIVATE
+            ADAYO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+        add_test(NAME adayo_p2_tests COMMAND adayo_p2_tests)
+    endif()
 endif()

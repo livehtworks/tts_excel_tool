@@ -1,6 +1,6 @@
 # Project Status
 
-Current phase: P1 Windows build and dependency baseline.
+Current phase: P2 workbook reader and config store verified.
 
 ## Current Architecture
 
@@ -22,6 +22,11 @@ Current phase: P1 Windows build and dependency baseline.
 - vcpkg dependency install completed after user allowed proxy use for C++ dependencies.
 - `windows-release` preset builds `AdayoCorpusTool.exe` and passes core tests.
 - Release EXE starts in both normal build directory and copied Chinese path directory.
+- OpenXLSX workbook reader is enabled in `windows-release`.
+- P2 tests read the desensitized legacy business fixture from both normal and Chinese filesystem paths.
+- Column analysis now maps the legacy `ARG` header to Arabic `ar-SA` per the P0 business fixture.
+- JSON config persistence is implemented through `JsonConfigStore`.
+- `windows-release` now runs both `adayo_core_tests` and `adayo_p2_tests`.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
 - Downloaded local candidate sherpa/Piper models:
   - `models/sherpa/vits-piper-en_US-amy-low`
@@ -29,13 +34,12 @@ Current phase: P1 Windows build and dependency baseline.
 
 ## Active Work
 
-- Establish pinned Windows dependency baseline with vcpkg.
-- Continue to P2 workbook reader/config store work once P1 is committed.
+- Move next to P3 UI wiring so workbook open/header selection/mapping persistence use the verified C++ services.
 - Keep sherpa-onnx as a separate pinned native dependency before enabling real TTS.
 
 ## Not Yet Complete
 
-- OpenXLSX reader is not implemented.
+- UI is not yet wired to the OpenXLSX reader/config store.
 - libxlsxwriter exporter is not fully wired to a pinned package.
 - sherpa-onnx native TTS is not verified.
 - Local TTS model files exist, but model registry schema and sherpa native runtime are not wired yet.

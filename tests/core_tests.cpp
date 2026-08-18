@@ -68,6 +68,7 @@ static void TestColumnGuess() {
     ColumnAnalyzer a;
     assert(a.GuessLanguage("英语说法举例") == "en-GB" || a.GuessLanguage("英语说法举例") == "en-US");
     assert(a.GuessLanguage("阿语测试结果") == "ar-SA");
+    assert(a.GuessLanguage("ARG") == "ar-SA");
     assert(a.GuessType("中文说法举例") == SuggestedColumnType::Utterance);
     assert(a.GuessType("测试结果") == SuggestedColumnType::Result);
 }

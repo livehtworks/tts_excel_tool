@@ -6,6 +6,7 @@
     "wxwidgets",
     "rapidfuzz-cpp",
     "utf8proc",
+    "nlohmann-json",
     "openxlsx",
     "libxlsxwriter",
     "miniaudio"
