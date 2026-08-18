@@ -1,0 +1,39 @@
+# Project Status
+
+Current phase: P1 Windows build and dependency baseline.
+
+## Current Architecture
+
+- C++20 / CMake project.
+- wxWidgets is the only intended desktop UI stack.
+- Core logic is separated from adapters and UI.
+- Old Python project is archived under `backup/old_project_20260818_160848` and is not a runtime dependency.
+
+## Completed Facts
+
+- Old project was moved into `backup/old_project_20260818_160848`.
+- Git repository was initialized in the workspace root.
+- Rewrite seed was expanded into the workspace root.
+- P0 desensitized business fixture was added under `tests/fixtures`.
+- Core build on Windows MSVC requires explicit `/utf-8`; this is now set in `CMakeLists.txt`.
+- Core tests pass with MSVC 19.44.35225.0 via `build-core`.
+- `windows-core` CMake preset builds and tests successfully.
+- vcpkg manifest dry-run resolves dependencies with wxWidgets locked to 3.2.8.1.
+- `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
+
+## Active Work
+
+- Establish pinned Windows dependency baseline with vcpkg.
+- Resolve vcpkg's automatic use of Windows IE/system proxy before running real dependency installation.
+- Verify `windows-release` CMake preset after dependencies are installed.
+- Keep sherpa-onnx as a separate pinned native dependency before enabling real TTS.
+
+## Not Yet Complete
+
+- wxWidgets desktop build is not yet verified.
+- vcpkg install is not run because vcpkg auto-detects `127.0.0.1:7897` from system proxy settings despite cleared process proxy variables.
+- OpenXLSX reader is not implemented.
+- libxlsxwriter exporter is not fully wired to a pinned package.
+- sherpa-onnx native TTS is not verified.
+- miniaudio playback is still a placeholder.
+- No production model package has been downloaded or accepted yet.

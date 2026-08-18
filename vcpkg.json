@@ -1,0 +1,19 @@
+{
+  "name": "adayo-corpus-tool",
+  "version-string": "0.1.0",
+  "builtin-baseline": "a2b75031b909a2d6b051725c3909230c72d4bd4a",
+  "dependencies": [
+    "wxwidgets",
+    "rapidfuzz-cpp",
+    "utf8proc",
+    "openxlsx",
+    "libxlsxwriter",
+    "miniaudio"
+  ],
+  "overrides": [
+    {
+      "name": "wxwidgets",
+      "version": "3.2.8.1"
+    }
+  ]
+}

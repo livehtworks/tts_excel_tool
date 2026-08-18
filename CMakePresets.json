@@ -1,0 +1,66 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-core",
+      "displayName": "Windows Core Tests",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/windows-core",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ADAYO_BUILD_DESKTOP": "OFF",
+        "ADAYO_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "windows-release",
+      "displayName": "Windows Desktop Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/windows-release",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "ADAYO_BUILD_DESKTOP": "ON",
+        "ADAYO_BUILD_TESTS": "ON",
+        "ADAYO_WITH_RAPIDFUZZ": "ON",
+        "ADAYO_WITH_UTF8PROC": "ON",
+        "ADAYO_WITH_MINIAUDIO": "OFF",
+        "ADAYO_WITH_OPENXLSX": "OFF",
+        "ADAYO_WITH_LIBXLSXWRITER": "OFF",
+        "ADAYO_WITH_SHERPA_ONNX": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-core",
+      "configurePreset": "windows-core"
+    },
+    {
+      "name": "windows-release",
+      "configurePreset": "windows-release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-core",
+      "configurePreset": "windows-core",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-release",
+      "configurePreset": "windows-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
