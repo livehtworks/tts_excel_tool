@@ -4,9 +4,12 @@
 
 #include "TestCheck.h"
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
+#include <numeric>
 #include <stdexcept>
+#include <vector>
 
 using namespace adayo;
 
@@ -29,6 +32,19 @@ void RequireUsableAudio(const AudioBuffer& audio) {
     REQUIRE(audio.sample_rate >= 8000);
     REQUIRE(audio.channels == 1);
     REQUIRE(!audio.samples.empty());
+}
+
+void PrintLatencyStats(const char* label, std::vector<long long> latencies_ms) {
+    REQUIRE(!latencies_ms.empty());
+    std::sort(latencies_ms.begin(), latencies_ms.end());
+    const auto total = std::accumulate(latencies_ms.begin(), latencies_ms.end(), 0LL);
+    const double average = static_cast<double>(total) / static_cast<double>(latencies_ms.size());
+    const std::size_t p95_index = (latencies_ms.size() * 95 + 99) / 100 - 1;
+    std::cout << label
+              << " count=" << latencies_ms.size()
+              << " avg_ms=" << average
+              << " p95_ms=" << latencies_ms[p95_index]
+              << "\n";
 }
 
 void TestSherpaSmokeAndSwitching() {
@@ -77,26 +93,38 @@ void TestSherpaRepeatedGeneration() {
     service.LoadModel(en.config);
 
     const auto start = std::chrono::steady_clock::now();
+    std::vector<long long> en_latencies;
+    en_latencies.reserve(500);
     for (int i = 0; i < 500; ++i) {
+        const auto item_start = std::chrono::steady_clock::now();
         RequireUsableAudio(service.Synthesize({"short stability sentence", en.config.language_code, 0, 1.0}));
+        en_latencies.push_back(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - item_start).count());
         if ((i + 1) % 50 == 0) {
             std::cout << "generated=" << (i + 1) << "\n" << std::flush;
         }
     }
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
     std::cout << "500 English sherpa generations elapsed_ms=" << elapsed << "\n";
+    PrintLatencyStats("500 English sherpa latency", std::move(en_latencies));
 
     std::cout << "P4 stress: 500 Chinese\n" << std::flush;
     service.LoadModel(zh.config);
     const auto zh_start = std::chrono::steady_clock::now();
+    std::vector<long long> zh_latencies;
+    zh_latencies.reserve(500);
     for (int i = 0; i < 500; ++i) {
+        const auto item_start = std::chrono::steady_clock::now();
         RequireUsableAudio(service.Synthesize({"短句稳定性测试", zh.config.language_code, 0, 1.0}));
+        zh_latencies.push_back(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - item_start).count());
         if ((i + 1) % 50 == 0) {
             std::cout << "generated_zh=" << (i + 1) << "\n" << std::flush;
         }
     }
     const auto zh_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - zh_start).count();
     std::cout << "500 Chinese sherpa generations elapsed_ms=" << zh_elapsed << "\n";
+    PrintLatencyStats("500 Chinese sherpa latency", std::move(zh_latencies));
 }
 } // namespace
 

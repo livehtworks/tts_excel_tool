@@ -171,6 +171,34 @@ void TestPerformance1000() {
     REQUIRE(rows.size() >= reference.size());
     std::cout << "P6 1000x992 compare elapsed_ms=" << elapsed << "\n";
 }
+
+void TestPerformance5000WithRapidfuzz() {
+#ifdef ADAYO_HAS_RAPIDFUZZ
+    CompareService service;
+    CompareOptions options;
+    options.alignment.alignment_threshold = 70.0;
+    options.alignment.anchor_threshold = 95.0;
+    std::vector<std::string> reference;
+    std::vector<std::string> actual;
+    reference.reserve(5000);
+    actual.reserve(5000);
+    for (int i = 0; i < 5000; ++i) {
+        reference.push_back("batch sentence " + std::to_string(i) + " open climate");
+        if (i % 521 != 0) {
+            actual.push_back("batch sentence " + std::to_string(i) + " open climate");
+        }
+    }
+
+    const auto start = std::chrono::steady_clock::now();
+    const auto rows = service.Compare(reference, actual, options);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+    AssertUniqueIndexes(rows);
+    REQUIRE(rows.size() >= reference.size());
+    std::cout << "P6 5000x4990 compare elapsed_ms=" << elapsed << "\n";
+#else
+    std::cout << "P6 rapidfuzz not enabled; skipping 5000-row performance assertion\n";
+#endif
+}
 } // namespace
 
 int main() {
@@ -181,5 +209,6 @@ int main() {
         TestTextImporterBomAndDelimiter();
         TestTextImporterUtf16Bom();
         TestPerformance1000();
+        TestPerformance5000WithRapidfuzz();
     });
 }

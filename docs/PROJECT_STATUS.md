@@ -1,6 +1,6 @@
 # Project Status
 
-Current phase: P9 acceptance revoked pending remediation R0-R6.
+Current phase: R6 local automation passed; target Windows PC manual acceptance pending. P9 acceptance remains revoked.
 
 ## Current Architecture
 
@@ -58,6 +58,8 @@ Current phase: P9 acceptance revoked pending remediation R0-R6.
 - R5 makes desktop application dependencies mandatory when `ADAYO_BUILD_DESKTOP=ON`.
 - R5 added a vcpkg overlay port for `libxlsxwriter@1.2.4#2` so third-party headers are installed reproducibly.
 - R5 added `models/package-manifest.json`; packaging copies and validates only listed local sherpa model ids.
+- R6 local automated regression passed on this workstation: `windows-core` 4/4 and `windows-release` 7/7.
+- R6 performance evidence recorded: P6 1000x992 in 258 ms, P6 5000x4990 in 6514 ms, English sherpa 500 avg 64.068 ms p95 79 ms, Chinese sherpa 500 avg 400.938 ms p95 456 ms.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
 - Downloaded local candidate sherpa/Piper models:
   - `models/sherpa/vits-piper-en_US-amy-low`
@@ -65,10 +67,9 @@ Current phase: P9 acceptance revoked pending remediation R0-R6.
 
 ## Active Work
 
-- Execute remediation checklist R0-R6 in order; R6 is next.
+- Target Windows PC manual acceptance from the R6 checklist is pending.
 
 ## Not Yet Complete
 
-- R0-R6 remediation is not yet complete.
 - Full P9 target-machine acceptance is not yet complete.
 - MOSS-TTS-Nano native adapter is intentionally blocked from runtime enablement.
