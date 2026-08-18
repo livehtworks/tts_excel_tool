@@ -1,6 +1,6 @@
 # Project Status
 
-Current phase: P9 locally accepted; target-machine acceptance pending.
+Current phase: P9 acceptance revoked pending remediation R0-R6.
 
 ## Current Architecture
 
@@ -41,8 +41,8 @@ Current phase: P9 locally accepted; target-machine acceptance pending.
 - `MossNanoTtsEngine` is compiled as an explicit-fail adapter and covered by `adayo_p8_moss_blocked_tests`.
 - P8 official MOSS ONNX sources were reviewed; status is `MOSS_PORT_BLOCKED` until native tokenizer and golden parity are implemented.
 - `scripts/package_windows.ps1` packages the release app, fixed DLLs, runtime directories, accepted sherpa models, and audit docs without downloading.
-- P9 local release regression passed: `7/7 tests passed`.
-- Independent package smoke start passed from a generated P9 package directory.
+- Previous P9 local release regression and package smoke evidence is superseded by R0 because Release tests used `assert()` before R0.
+- R0 replaced Release-unsafe `assert()` tests with always-on test checks and exposed the R1-1 `ENG结果` column classification failure.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
 - Downloaded local candidate sherpa/Piper models:
   - `models/sherpa/vits-piper-en_US-amy-low`
@@ -50,10 +50,11 @@ Current phase: P9 locally accepted; target-machine acceptance pending.
 
 ## Active Work
 
-- No active implementation work after final ZIP regeneration.
+- Execute remediation checklist R0-R6 in order; R1-1 is next.
 
 ## Not Yet Complete
 
 - UI audio controls are not fully wired to `PlaybackService` buttons yet.
+- R0-R6 remediation is not yet complete.
 - Full P9 target-machine acceptance is not yet complete.
 - MOSS-TTS-Nano native adapter is intentionally blocked from runtime enablement.

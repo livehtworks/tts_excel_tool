@@ -1,6 +1,7 @@
 #include "adapters/tts/MossNanoTtsEngine.h"
 
-#include <cassert>
+#include "TestCheck.h"
+
 #include <stdexcept>
 #include <string>
 
@@ -9,14 +10,14 @@ using namespace adayo;
 namespace {
 
 void AssertMossPortBlockedMessage(const std::string& message) {
-    assert(message.find("MOSS Nano ONNX C++ adapter") != std::string::npos);
-    assert(message.find("禁止启用") != std::string::npos);
+    REQUIRE(message.find("MOSS Nano ONNX C++ adapter") != std::string::npos);
+    REQUIRE(message.find("禁止启用") != std::string::npos);
 }
 
 void TestMossAdapterRemainsBlockedUntilOfficialParityExists() {
     MossNanoTtsEngine engine;
-    assert(engine.Id() == "moss-nano-onnx");
-    assert(!engine.IsLoaded());
+    REQUIRE(engine.Id() == "moss-nano-onnx");
+    REQUIRE(!engine.IsLoaded());
 
     TtsModelConfig config;
     bool load_threw = false;
@@ -26,8 +27,8 @@ void TestMossAdapterRemainsBlockedUntilOfficialParityExists() {
         load_threw = true;
         AssertMossPortBlockedMessage(ex.what());
     }
-    assert(load_threw);
-    assert(!engine.IsLoaded());
+    REQUIRE(load_threw);
+    REQUIRE(!engine.IsLoaded());
 
     TtsRequest request;
     request.text = "hello";
@@ -38,12 +39,13 @@ void TestMossAdapterRemainsBlockedUntilOfficialParityExists() {
         synthesize_threw = true;
         AssertMossPortBlockedMessage(ex.what());
     }
-    assert(synthesize_threw);
+    REQUIRE(synthesize_threw);
 }
 
 } // namespace
 
 int main() {
-    TestMossAdapterRemainsBlockedUntilOfficialParityExists();
-    return 0;
+    return test::RunTestMain("adayo_p8_moss_blocked_tests", [] {
+        TestMossAdapterRemainsBlockedUntilOfficialParityExists();
+    });
 }

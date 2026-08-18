@@ -1,6 +1,7 @@
 #include "services/CompareService.h"
 
-#include <cassert>
+#include "TestCheck.h"
+
 #include <chrono>
 #include <iostream>
 #include <set>
@@ -12,8 +13,8 @@ void AssertUniqueIndexes(const std::vector<CompareRow>& rows) {
     std::set<std::size_t> refs;
     std::set<std::size_t> acts;
     for (const auto& row : rows) {
-        if (row.reference_index) assert(refs.insert(*row.reference_index).second);
-        if (row.actual_index) assert(acts.insert(*row.actual_index).second);
+        if (row.reference_index) REQUIRE(refs.insert(*row.reference_index).second);
+        if (row.actual_index) REQUIRE(acts.insert(*row.actual_index).second);
     }
 }
 
@@ -66,15 +67,19 @@ void TestFixedAlignmentSet() {
 
     const auto rows = service.Compare(reference, actual, options);
     AssertUniqueIndexes(rows);
-    assert(ContainsStatusForReference(rows, "打开空调", CompareStatus::Ok));
-    assert(ContainsStatusForReference(rows, "温度设置为22度", CompareStatus::Ng));
-    assert(ContainsStatusForReference(rows, "Turn ON lights!", CompareStatus::Ok));
-    assert(ContainsStatusForReference(rows, "مرحبا بالعالم", CompareStatus::Ok));
-    assert(ContainsStatusForReference(rows, "缺失一", CompareStatus::Missing));
-    assert(ContainsStatusForReference(rows, "缺失二", CompareStatus::Missing));
-    assert(ContainsStatusForReference(rows, "缺失三", CompareStatus::Missing));
-    assert(ContainsStatusForReference(rows, "ＡＢＣ１２３", CompareStatus::Ok));
-    assert(ContainsExtra(rows, "机器额外句"));
+    REQUIRE(ContainsStatusForReference(rows, "打开空调", CompareStatus::Ok));
+    REQUIRE(ContainsStatusForReference(rows, "温度设置为22度", CompareStatus::Ng));
+    REQUIRE(ContainsStatusForReference(rows, "Turn ON lights!", CompareStatus::Ok));
+    REQUIRE(ContainsStatusForReference(rows, "مرحبا بالعالم", CompareStatus::Ok));
+    REQUIRE(ContainsStatusForReference(rows, "缺失一", CompareStatus::Missing));
+    REQUIRE(ContainsStatusForReference(rows, "缺失二", CompareStatus::Missing));
+    REQUIRE(ContainsStatusForReference(rows, "缺失三", CompareStatus::Missing));
+#ifdef ADAYO_HAS_UTF8PROC
+    REQUIRE(ContainsStatusForReference(rows, "ＡＢＣ１２３", CompareStatus::Ok));
+#else
+    std::cout << "P6 NFKC capability not enabled; skipping full-width NFKC assertion\n";
+#endif
+    REQUIRE(ContainsExtra(rows, "机器额外句"));
 }
 
 void TestPunctuationSwitch() {
@@ -83,14 +88,14 @@ void TestPunctuationSwitch() {
     loose.normalizer.ignore_punctuation = true;
     loose.pass_threshold = 100.0;
     auto rows = service.Compare({"hello!"}, {"hello"}, loose);
-    assert(rows.size() == 1);
-    assert(rows[0].status == CompareStatus::Ok);
+    REQUIRE(rows.size() == 1);
+    REQUIRE(rows[0].status == CompareStatus::Ok);
 
     CompareOptions strict;
     strict.normalizer.ignore_punctuation = false;
     strict.pass_threshold = 100.0;
     rows = service.Compare({"hello!"}, {"hello"}, strict);
-    assert(rows[0].status == CompareStatus::Ng);
+    REQUIRE(rows[0].status == CompareStatus::Ng);
 }
 
 void TestPerformance1000() {
@@ -111,15 +116,15 @@ void TestPerformance1000() {
     const auto rows = service.Compare(reference, actual, options);
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
     AssertUniqueIndexes(rows);
-    assert(rows.size() >= reference.size());
+    REQUIRE(rows.size() >= reference.size());
     std::cout << "P6 1000x992 compare elapsed_ms=" << elapsed << "\n";
 }
 } // namespace
 
 int main() {
-    TestFixedAlignmentSet();
-    TestPunctuationSwitch();
-    TestPerformance1000();
-    std::cout << "adayo_p6_compare_tests: PASS\n";
-    return 0;
+    return test::RunTestMain("adayo_p6_compare_tests", [] {
+        TestFixedAlignmentSet();
+        TestPunctuationSwitch();
+        TestPerformance1000();
+    });
 }

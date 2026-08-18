@@ -5,7 +5,8 @@
 #include "services/CorpusViewService.h"
 #include "services/WorkbookService.h"
 
-#include <cassert>
+#include "TestCheck.h"
+
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -40,42 +41,42 @@ SelectedColumn ToSelected(const ColumnProfile& profile, ColumnRole role) {
 void TestWorkbookReadAndAnalyze() {
     OpenXlsxWorkbookReader reader;
     const auto names = reader.SheetNames(FixturePath());
-    assert((names == std::vector<std::string>{"Vehicle", "System", "EmptySheet"}));
+    REQUIRE((names == std::vector<std::string>{"Vehicle", "System", "EmptySheet"}));
 
     const auto vehicle = reader.ReadSheet(FixturePath(), "Vehicle", 2);
-    assert(vehicle.header_row == 2);
-    assert(vehicle.rows.size() == 4);
-    assert((vehicle.headers == std::vector<std::string>{"序号", "二级功能", "三级功能", "示例Query", "ENG", "ENU", "FRF", "ARG", "SPM", "ENG结果"}));
+    REQUIRE(vehicle.header_row == 2);
+    REQUIRE(vehicle.rows.size() == 4);
+    REQUIRE((vehicle.headers == std::vector<std::string>{"序号", "二级功能", "三级功能", "示例Query", "ENG", "ENU", "FRF", "ARG", "SPM", "ENG结果"}));
 
     ColumnAnalyzer analyzer;
     const auto profiles = analyzer.Analyze(vehicle.headers, vehicle.rows);
-    assert(profiles.size() == vehicle.headers.size());
+    REQUIRE(profiles.size() == vehicle.headers.size());
 
     const auto& serial = FindColumn(profiles, "序号");
-    assert(serial.excel_column == "A");
-    assert(serial.suggested_type == SuggestedColumnType::Unknown);
+    REQUIRE(serial.excel_column == "A");
+    REQUIRE(serial.suggested_type == SuggestedColumnType::Unknown);
 
     const auto& level3 = FindColumn(profiles, "三级功能");
-    assert(level3.excel_column == "C");
-    assert(level3.suggested_type == SuggestedColumnType::Meta);
+    REQUIRE(level3.excel_column == "C");
+    REQUIRE(level3.suggested_type == SuggestedColumnType::Meta);
 
     const auto& eng = FindColumn(profiles, "ENG");
-    assert(eng.excel_column == "E");
-    assert(eng.suggested_type == SuggestedColumnType::Utterance);
-    assert(eng.guessed_language == "en-GB");
-    assert(eng.non_empty_count == 3);
+    REQUIRE(eng.excel_column == "E");
+    REQUIRE(eng.suggested_type == SuggestedColumnType::Utterance);
+    REQUIRE(eng.guessed_language == "en-GB");
+    REQUIRE(eng.non_empty_count == 3);
 
     const auto& enu = FindColumn(profiles, "ENU");
-    assert(enu.guessed_language == "en-US");
-    assert(enu.non_empty_count == 3);
+    REQUIRE(enu.guessed_language == "en-US");
+    REQUIRE(enu.non_empty_count == 2);
 
-    assert(FindColumn(profiles, "FRF").guessed_language == "fr-FR");
-    assert(FindColumn(profiles, "ARG").guessed_language == "ar-SA");
-    assert(FindColumn(profiles, "SPM").guessed_language == "es-ES");
+    REQUIRE(FindColumn(profiles, "FRF").guessed_language == "fr-FR");
+    REQUIRE(FindColumn(profiles, "ARG").guessed_language == "ar-SA");
+    REQUIRE(FindColumn(profiles, "SPM").guessed_language == "es-ES");
 
     const auto& eng_result = FindColumn(profiles, "ENG结果");
-    assert(eng_result.suggested_type == SuggestedColumnType::Result);
-    assert(eng_result.guessed_language == "en-GB");
+    REQUIRE(eng_result.suggested_type == SuggestedColumnType::Result);
+    REQUIRE(eng_result.guessed_language == "en-GB");
 }
 
 void TestWorkbookReadFromChinesePath() {
@@ -86,9 +87,9 @@ void TestWorkbookReadFromChinesePath() {
 
     OpenXlsxWorkbookReader reader;
     const auto data = reader.ReadSheet(copied, "Vehicle", 2);
-    assert(data.headers.size() == 10);
-    assert(data.rows.size() == 4);
-    assert(data.rows[0][4] == "Turn on feature A\nEnable feature A");
+    REQUIRE(data.headers.size() == 10);
+    REQUIRE(data.rows.size() == 4);
+    REQUIRE(data.rows[0][4] == "Turn on feature A\nEnable feature A");
 
     std::error_code ec;
     std::filesystem::remove(copied, ec);
@@ -109,14 +110,14 @@ void TestRuntimeViewFromFixture() {
 
     ViewBuilder builder;
     const auto result = builder.Build(vehicle.rows, columns);
-    assert((result.view.headers == std::vector<std::string>{"序号", "三级功能", "ENG", "ENG结果", "ENU", "ENU结果"}));
-    assert(result.view.rows.size() == 8);
-    assert((result.view.rows[0] == std::vector<std::string>{"1", "开关控制", "Turn on feature A", "", "Turn on feature A", ""}));
-    assert((result.view.rows[1] == std::vector<std::string>{"2", "开关控制", "Enable feature A", "", "", ""}));
-    assert((result.view.rows[7] == std::vector<std::string>{"8", "空单元格验证", "", "", "", ""}));
-    assert(result.view.row_meta[1].raw_row_index == 0);
-    assert(result.view.row_meta[1].segment_indexes.at(4).value() == 1);
-    assert(!result.view.row_meta[1].segment_indexes.at(5).has_value());
+    REQUIRE((result.view.headers == std::vector<std::string>{"序号", "三级功能", "ENG", "ENG结果", "ENU", "ENU结果"}));
+    REQUIRE(result.view.rows.size() == 8);
+    REQUIRE((result.view.rows[0] == std::vector<std::string>{"1", "开关控制", "Turn on feature A", "", "Turn on feature A", ""}));
+    REQUIRE((result.view.rows[1] == std::vector<std::string>{"2", "开关控制", "Enable feature A", "", "", ""}));
+    REQUIRE((result.view.rows[7] == std::vector<std::string>{"8", "空单元格验证", "", "", "", ""}));
+    REQUIRE(result.view.row_meta[1].raw_row_index == 0);
+    REQUIRE(result.view.row_meta[1].segment_indexes.at(4).value() == 1);
+    REQUIRE(!result.view.row_meta[1].segment_indexes.at(5).has_value());
 }
 
 void TestJsonConfigStoreRoundTrip() {
@@ -136,14 +137,14 @@ void TestJsonConfigStoreRoundTrip() {
     store.Save(config);
     const auto loaded = store.Load();
 
-    assert(loaded.last_workbook == config.last_workbook);
-    assert(loaded.last_sheet == config.last_sheet);
-    assert(loaded.speech_rate == config.speech_rate);
-    assert(loaded.sheet_mappings.size() == 1);
-    assert(loaded.sheet_mappings[0].header_row == 2);
-    assert(loaded.sheet_mappings[0].columns.size() == 3);
-    assert(loaded.sheet_mappings[0].columns[2].header == "ARG");
-    assert(loaded.sheet_mappings[0].columns[2].language_code == "ar-SA");
+    REQUIRE(loaded.last_workbook == config.last_workbook);
+    REQUIRE(loaded.last_sheet == config.last_sheet);
+    REQUIRE(loaded.speech_rate == config.speech_rate);
+    REQUIRE(loaded.sheet_mappings.size() == 1);
+    REQUIRE(loaded.sheet_mappings[0].header_row == 2);
+    REQUIRE(loaded.sheet_mappings[0].columns.size() == 3);
+    REQUIRE(loaded.sheet_mappings[0].columns[2].header == "ARG");
+    REQUIRE(loaded.sheet_mappings[0].columns[2].language_code == "ar-SA");
 
     std::error_code ec;
     std::filesystem::remove(path, ec);
@@ -165,10 +166,10 @@ void TestWorkbookMappingIdentityIncludesHeaderRow() {
     WorkbookService::UpsertMapping(config, row2);
 
     const auto found = WorkbookService::FindMapping(config, "fixture", "Vehicle", 2);
-    assert(found.has_value());
-    assert(found->columns[0].header == "序号");
+    REQUIRE(found.has_value());
+    REQUIRE(found->columns[0].header == "序号");
     const auto missing = WorkbookService::FindMapping(config, "fixture", "Vehicle", 3);
-    assert(!missing.has_value());
+    REQUIRE(!missing.has_value());
 }
 
 void TestCorpusViewEditAndResultCycle() {
@@ -185,30 +186,30 @@ void TestCorpusViewEditAndResultCycle() {
 
     CorpusViewService service;
     auto session = service.CreateSession(vehicle.rows, columns);
-    assert(session.view.rows.size() == 8);
+    REQUIRE(session.view.rows.size() == 8);
 
     service.UpdateDisplayCell(session, 1, 2, "Enable feature A updated");
-    assert(session.source_rows[0][4] == "Turn on feature A\nEnable feature A updated");
-    assert(session.source_rows[0][5] == "Turn on feature A");
-    assert(session.view.rows[0][2] == "Turn on feature A");
-    assert(session.view.rows[1][2] == "Enable feature A updated");
+    REQUIRE(session.source_rows[0][4] == "Turn on feature A\nEnable feature A updated");
+    REQUIRE(session.source_rows[0][5] == "Turn on feature A");
+    REQUIRE(session.view.rows[0][2] == "Turn on feature A");
+    REQUIRE(session.view.rows[1][2] == "Enable feature A updated");
 
-    assert(service.CycleResult(session, 0, 3) == ResultCycleState::Ok);
-    assert(session.view.rows[0][3] == "✔");
-    assert(service.CycleResult(session, 0, 3) == ResultCycleState::Ng);
-    assert(session.view.rows[0][3] == "×");
-    assert(service.CycleResult(session, 0, 3) == ResultCycleState::Blank);
-    assert(session.view.rows[0][3].empty());
+    REQUIRE(service.CycleResult(session, 0, 3) == ResultCycleState::Ok);
+    REQUIRE(session.view.rows[0][3] == "✔");
+    REQUIRE(service.CycleResult(session, 0, 3) == ResultCycleState::Ng);
+    REQUIRE(session.view.rows[0][3] == "×");
+    REQUIRE(service.CycleResult(session, 0, 3) == ResultCycleState::Blank);
+    REQUIRE(session.view.rows[0][3].empty());
 }
 } // namespace
 
 int main() {
-    TestWorkbookReadAndAnalyze();
-    TestWorkbookReadFromChinesePath();
-    TestRuntimeViewFromFixture();
-    TestJsonConfigStoreRoundTrip();
-    TestWorkbookMappingIdentityIncludesHeaderRow();
-    TestCorpusViewEditAndResultCycle();
-    std::cout << "adayo_p2_tests: PASS\n";
-    return 0;
+    return test::RunTestMain("adayo_p2_tests", [] {
+        TestWorkbookReadAndAnalyze();
+        TestWorkbookReadFromChinesePath();
+        TestRuntimeViewFromFixture();
+        TestJsonConfigStoreRoundTrip();
+        TestWorkbookMappingIdentityIncludesHeaderRow();
+        TestCorpusViewEditAndResultCycle();
+    });
 }

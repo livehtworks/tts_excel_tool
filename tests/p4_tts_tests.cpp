@@ -2,7 +2,8 @@
 #include "services/ModelRegistry.h"
 #include "services/TtsService.h"
 
-#include <cassert>
+#include "TestCheck.h"
+
 #include <chrono>
 #include <iostream>
 #include <stdexcept>
@@ -25,16 +26,16 @@ const TtsModelEntry& FindId(const std::vector<TtsModelEntry>& entries, const std
 }
 
 void RequireUsableAudio(const AudioBuffer& audio) {
-    assert(audio.sample_rate >= 8000);
-    assert(audio.channels == 1);
-    assert(!audio.samples.empty());
+    REQUIRE(audio.sample_rate >= 8000);
+    REQUIRE(audio.channels == 1);
+    REQUIRE(!audio.samples.empty());
 }
 
 void TestSherpaSmokeAndSwitching() {
     std::cout << "P4 smoke: scan models\n" << std::flush;
     ModelRegistry registry(std::filesystem::path(ADAYO_MODELS_DIR) / "sherpa");
     const auto entries = registry.ScanSherpaModels();
-    assert(entries.size() >= 2);
+    REQUIRE(entries.size() >= 2);
     const auto& en = FindLanguage(entries, "en-US");
     const auto& zh = FindId(entries, "vits-piper-zh_CN-xiao_ya-medium-int8");
 
@@ -82,8 +83,8 @@ void TestSherpaRepeatedGeneration() {
 } // namespace
 
 int main() {
-    TestSherpaSmokeAndSwitching();
-    TestSherpaRepeatedGeneration();
-    std::cout << "adayo_p4_tts_tests: PASS\n";
-    return 0;
+    return test::RunTestMain("adayo_p4_tts_tests", [] {
+        TestSherpaSmokeAndSwitching();
+        TestSherpaRepeatedGeneration();
+    });
 }

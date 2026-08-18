@@ -8,6 +8,7 @@
 *.user
 *.suo
 *.VC.db
+*.obj
 /logs/
 /cache/
 /exports/

@@ -6,7 +6,8 @@
 #include "adapters/excel/OpenXlsxWorkbookReader.h"
 #endif
 
-#include <cassert>
+#include "TestCheck.h"
+
 #include <filesystem>
 #include <iostream>
 
@@ -52,17 +53,17 @@ void TestRuntimeExport() {
     const auto output = OutputDir() / "运行视图.xlsx";
     LibXlsxWriterExporter exporter;
     exporter.ExportRuntimeView(MakeRuntimeView(), output);
-    assert(std::filesystem::exists(output));
-    assert(std::filesystem::file_size(output) > 0);
+    REQUIRE(std::filesystem::exists(output));
+    REQUIRE(std::filesystem::file_size(output) > 0);
 
 #ifdef ADAYO_CAN_VERIFY_XLSX_READ
     std::cout << "P7 runtime readback\n" << std::flush;
     OpenXlsxWorkbookReader reader;
     const auto data = reader.ReadSheet(output, "运行视图", 1);
-    assert(data.headers.size() == 6);
-    assert(data.rows[0][1] == "开关控制");
-    assert(data.rows[0][2] == "Turn on feature A");
-    assert(data.rows[0][3] == "✔");
+    REQUIRE(data.headers.size() == 6);
+    REQUIRE(data.rows[0][1] == "开关控制");
+    REQUIRE(data.rows[0][2] == "Turn on feature A");
+    REQUIRE(data.rows[0][3] == "✔");
 #endif
 }
 
@@ -71,25 +72,25 @@ void TestComparisonExport() {
     const auto output = OutputDir() / "对比报告.xlsx";
     LibXlsxWriterExporter exporter;
     exporter.ExportComparison(MakeCompareRows(), output);
-    assert(std::filesystem::exists(output));
-    assert(std::filesystem::file_size(output) > 0);
+    REQUIRE(std::filesystem::exists(output));
+    REQUIRE(std::filesystem::file_size(output) > 0);
 
 #ifdef ADAYO_CAN_VERIFY_XLSX_READ
     std::cout << "P7 comparison readback\n" << std::flush;
     OpenXlsxWorkbookReader reader;
     const auto data = reader.ReadSheet(output, "文本对比", 1);
-    assert(data.headers.size() == 4);
-    assert(data.rows[0][0] == "温度设置为22度");
-    assert(data.rows[0][1] == "温度设置为23度");
-    assert(data.rows[0][3] == "NG");
-    assert(data.rows[2][0] == "مرحبا بالعالم");
+    REQUIRE(data.headers.size() == 4);
+    REQUIRE(data.rows[0][0] == "温度设置为22度");
+    REQUIRE(data.rows[0][1] == "温度设置为23度");
+    REQUIRE(data.rows[0][3] == "NG");
+    REQUIRE(data.rows[2][0] == "مرحبا بالعالم");
 #endif
 }
 } // namespace
 
 int main() {
-    TestRuntimeExport();
-    TestComparisonExport();
-    std::cout << "adayo_p7_export_tests: PASS\n";
-    return 0;
+    return test::RunTestMain("adayo_p7_export_tests", [] {
+        TestRuntimeExport();
+        TestComparisonExport();
+    });
 }

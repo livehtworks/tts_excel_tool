@@ -1,6 +1,6 @@
 # P9 Final Packaging And Acceptance
 
-Status: locally accepted; target-machine acceptance remains pending.
+Status: superseded by R0. P9 acceptance is revoked pending remediation R0-R6.
 
 ## Scope
 
@@ -13,6 +13,8 @@ Status: locally accepted; target-machine acceptance remains pending.
 - Keep MOSS disabled because P8 is `MOSS_PORT_BLOCKED`.
 
 ## Local Acceptance
+
+The evidence below is retained as historical smoke evidence only. It is not a current P9 acceptance conclusion because R0 found that Release tests used standard `assert()` before the remediation pass.
 
 - Build command:
   - `cmake --build --preset windows-release --config Release`

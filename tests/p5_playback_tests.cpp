@@ -2,7 +2,8 @@
 #include "core/tts/ITtsEngine.h"
 #include "services/PlaybackService.h"
 
-#include <cassert>
+#include "TestCheck.h"
+
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -37,7 +38,7 @@ private:
 class FakePlayer final : public IAudioPlayer {
 public:
     void Play(const AudioBuffer& audio) override {
-        assert(!audio.samples.empty());
+        REQUIRE(!audio.samples.empty());
         {
             std::lock_guard lock(mutex);
             ++play_count;
@@ -83,11 +84,11 @@ void TestSequenceSkipsEmptyAndReturnsIdle() {
         {{"third", "en-US", 0, 1.0}, 12, 2},
     }, std::chrono::milliseconds{1}, 1.0);
 
-    assert(playback.WaitUntilIdle(std::chrono::seconds{2}));
-    assert(playback.State() == PlaybackState::Idle);
-    assert(engine->synth_count == 2);
-    assert(player.play_count == 2);
-    assert(playback.CurrentRow() == 12);
+    REQUIRE(playback.WaitUntilIdle(std::chrono::seconds{2}));
+    REQUIRE(playback.State() == PlaybackState::Idle);
+    REQUIRE(engine->synth_count == 2);
+    REQUIRE(player.play_count == 2);
+    REQUIRE(playback.CurrentRow() == 12);
 }
 
 void TestPauseResumeAndStopDoNotLeaveStaleState() {
@@ -99,20 +100,21 @@ void TestPauseResumeAndStopDoNotLeaveStaleState() {
     PlaybackService playback(tts, player);
 
     playback.PlaySequence({{{"first", "en-US", 0, 1.0}, 1, 1}}, std::chrono::milliseconds{0}, 1.0);
-    assert(player.WaitForPlayCount(1, std::chrono::seconds{2}));
+    REQUIRE(player.WaitForPlayCount(1, std::chrono::seconds{2}));
     playback.Pause();
-    assert(playback.State() == PlaybackState::Paused || playback.State() == PlaybackState::Idle);
+    REQUIRE(playback.State() == PlaybackState::Paused || playback.State() == PlaybackState::Idle);
     playback.Resume();
     playback.Stop();
-    assert(playback.WaitUntilIdle(std::chrono::seconds{2}));
-    assert(playback.State() == PlaybackState::Idle);
-    assert(player.stop_count >= 1);
-    assert(player.resume_count >= 1);
+    REQUIRE(playback.WaitUntilIdle(std::chrono::seconds{2}));
+    REQUIRE(playback.State() == PlaybackState::Idle);
+    REQUIRE(player.stop_count >= 1);
+    REQUIRE(player.resume_count >= 1);
 }
 } // namespace
 
 int main() {
-    TestSequenceSkipsEmptyAndReturnsIdle();
-    TestPauseResumeAndStopDoNotLeaveStaleState();
-    return 0;
+    return test::RunTestMain("adayo_p5_playback_tests", [] {
+        TestSequenceSkipsEmptyAndReturnsIdle();
+        TestPauseResumeAndStopDoNotLeaveStaleState();
+    });
 }
