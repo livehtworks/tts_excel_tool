@@ -1,6 +1,6 @@
 # Project Status
 
-Current phase: P7 compare UI and Excel export verified.
+Current phase: P8 MOSS assessment blocked by official parity requirements; P9 packaging in progress.
 
 ## Current Architecture
 
@@ -38,6 +38,8 @@ Current phase: P7 compare UI and Excel export verified.
 - `ComparePanel` imports text files, runs `CompareService`, and displays alignment results.
 - `LibXlsxWriterExporter` is enabled and exports runtime/compare workbooks.
 - Runtime and compare Excel export are verified in a Chinese output path.
+- `MossNanoTtsEngine` is compiled as an explicit-fail adapter and covered by `adayo_p8_moss_blocked_tests`.
+- P8 official MOSS ONNX sources were reviewed; status is `MOSS_PORT_BLOCKED` until native tokenizer and golden parity are implemented.
 - `hf-mirror.com` works for small sherpa/Piper model metadata downloads without proxy.
 - Downloaded local candidate sherpa/Piper models:
   - `models/sherpa/vits-piper-en_US-amy-low`
@@ -45,11 +47,11 @@ Current phase: P7 compare UI and Excel export verified.
 
 ## Active Work
 
-- Move next to P8 MOSS-TTS-Nano assessment and P9 packaging/final acceptance.
+- Move next to P9 packaging/final acceptance.
 - Keep sherpa-onnx as a separate pinned native dependency before enabling real TTS.
 
 ## Not Yet Complete
 
 - UI audio controls are not fully wired to `PlaybackService` buttons yet.
 - Full P9 target-machine acceptance is not yet complete.
-- MOSS-TTS-Nano native adapter is not implemented.
+- MOSS-TTS-Nano native adapter is intentionally blocked from runtime enablement.

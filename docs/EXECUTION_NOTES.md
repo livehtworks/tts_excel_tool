@@ -62,3 +62,10 @@ Copy-Item -Path D:\programsoft\tools\vcpkg\buildtrees\libxlsxwriter\src\v1.2.4-e
 - Plain old Piper `.onnx + .json` files are not enough for the current sherpa adapter; converted models also need `tokens.txt` and `espeak-ng-data`.
 - The local huayan x_low Chinese model failed native sherpa generation because Chinese lexicon/FST resources were missing.
 - The accepted Chinese P4 model is official `vits-piper-zh_CN-xiao_ya-medium-int8`, downloaded without process proxy variables.
+
+## MOSS-TTS-Nano
+
+- Official source checkouts for P8 assessment are local read-only tooling references:
+  - `D:\programsoft\tools\moss-tts\MOSS-TTS-Nano`
+  - `D:\programsoft\tools\moss-tts\MOSS-TTS-Nano-Reader`
+- MOSS ONNX uses multiple coordinated graphs plus manifest metadata and SentencePiece tokenization. Do not enable `MossNanoTtsEngine` until C++ tokenizer parity and golden ONNX output checks exist.

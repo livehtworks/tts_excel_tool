@@ -37,6 +37,10 @@ add_library(adayo_core STATIC
 )
 target_include_directories(adayo_core PUBLIC src)
 
+add_library(adayo_moss_adapter STATIC src/adapters/tts/MossNanoTtsEngine.cpp)
+target_include_directories(adayo_moss_adapter PUBLIC src)
+target_link_libraries(adayo_moss_adapter PUBLIC adayo_core)
+
 if(ADAYO_WITH_RAPIDFUZZ)
     find_package(rapidfuzz CONFIG REQUIRED)
     target_link_libraries(adayo_core PUBLIC rapidfuzz::rapidfuzz)
@@ -160,6 +164,10 @@ if(ADAYO_BUILD_TESTS)
     add_executable(adayo_p5_playback_tests tests/p5_playback_tests.cpp)
     target_link_libraries(adayo_p5_playback_tests PRIVATE adayo_core)
     add_test(NAME adayo_p5_playback_tests COMMAND adayo_p5_playback_tests)
+
+    add_executable(adayo_p8_moss_blocked_tests tests/p8_moss_blocked_tests.cpp)
+    target_link_libraries(adayo_p8_moss_blocked_tests PRIVATE adayo_core adayo_moss_adapter)
+    add_test(NAME adayo_p8_moss_blocked_tests COMMAND adayo_p8_moss_blocked_tests)
 
     add_executable(adayo_p6_compare_tests tests/p6_compare_tests.cpp)
     target_link_libraries(adayo_p6_compare_tests PRIVATE adayo_core)
