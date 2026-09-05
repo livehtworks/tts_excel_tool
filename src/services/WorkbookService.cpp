@@ -18,18 +18,20 @@ WorkbookService::WorkbookService(std::unique_ptr<IWorkbookReader> reader)
 std::vector<std::string> WorkbookService::SheetNames(const std::filesystem::path& path) const {
     return reader_->SheetNames(path);
 }
+std::vector<WorksheetInfo> WorkbookService::SheetMetadata(const std::filesystem::path& path) const { return reader_->SheetMetadata(path); }
 
 WorkbookAnalysis WorkbookService::AnalyzeSheet(
     const std::filesystem::path& path,
     const std::string& sheet_name,
     std::size_t header_row,
-    const AppConfig& config) const {
+    const AppConfig& config, std::stop_token token) const {
 
     WorkbookAnalysis analysis;
     analysis.path = path;
     analysis.identity = WorkbookIdentity(path);
     analysis.sheet_name = sheet_name;
-    analysis.worksheet = reader_->ReadSheet(path, sheet_name, header_row);
+    analysis.worksheet = reader_->ReadSheet(path, sheet_name, header_row, token);
+    analysis.worksheet.source.identity=analysis.identity;
     analysis.columns = analyzer_.Analyze(analysis.worksheet.headers, analysis.worksheet.rows);
     analysis.saved_mapping = FindMapping(config, analysis.identity, sheet_name, header_row);
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/workbook/ViewBuilder.h"
+#include "adapters/excel/IWorkbookReader.h"
 
 #include <optional>
 #include <string>
@@ -19,6 +20,16 @@ struct CorpusSession {
     std::vector<SelectedColumn> selected_columns;
     RuntimeView view;
     std::unordered_map<ResultIdentity, std::string, ResultIdentityHash> result_marks;
+    std::vector<std::size_t> source_excel_row_numbers;
+    std::vector<MergedRange> merged_ranges;
+    std::vector<std::size_t> reference_owners;
+    WorkbookSource source;
+    std::vector<std::string> diagnostics;
+};
+struct CellEditImpact {
+    std::vector<std::size_t> raw_rows;
+    std::vector<std::size_t> display_rows;
+    bool segment_structure_changed{};
 };
 
 class CorpusViewService {
@@ -27,7 +38,8 @@ public:
         std::vector<std::vector<std::string>> source_rows,
         std::vector<SelectedColumn> selected_columns) const;
 
-    void UpdateDisplayCell(CorpusSession& session, std::size_t display_row, std::size_t display_column, const std::string& value) const;
+    CorpusSession CreateSessionFromWorksheet(WorksheetData worksheet, std::vector<SelectedColumn> selected_columns) const;
+    CellEditImpact UpdateDisplayCell(CorpusSession& session, std::size_t display_row, std::size_t display_column, const std::string& value) const;
     ResultCycleState CycleResult(CorpusSession& session, std::size_t display_row, std::size_t display_column) const;
     void Rebuild(CorpusSession& session) const;
 

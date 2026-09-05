@@ -6,6 +6,10 @@
 #include "services/ModelRegistry.h"
 #include "services/WorkbookService.h"
 #include "platform/FileIo.h"
+#include "platform/UnicodePath.h"
+#include <nlohmann/json.hpp>
+#include <cstdlib>
+#include <map>
 #include <chrono>
 
 #include "TestCheck.h"
@@ -538,6 +542,79 @@ void TestSyntheticBlankCannotBeEditedOrMarked() {
 }
 } // namespace
 
+void TestExternalReviewWorkbook() {
+    const auto* environment=std::getenv("ADAYO_REVIEW_WORKPACK");
+    if(!environment) { std::cout << "External private workbook: NOT_RUN (ADAYO_REVIEW_WORKPACK not set)\n"; return; }
+    const auto root=PathFromUtf8(environment);
+    std::ifstream input(root/"fixtures"/"workbook_acceptance.json"); const auto fixture=nlohmann::json::parse(input);
+    const auto path=root/PathFromUtf8(fixture.at("source_file").get<std::string>());
+    const auto hash=FileSha256(path); REQUIRE(hash==fixture.at("sha256").get<std::string>());
+    OpenXlsxWorkbookReader reader; const auto sheets=reader.SheetMetadata(path);
+    REQUIRE(sheets.size()==13); REQUIRE(reader.SheetNames(path).size()==13);
+    REQUIRE(std::count_if(sheets.begin(),sheets.end(),[](const auto& s){return s.visibility==SheetVisibility::Visible;})==12);
+    std::map<std::string,WorksheetData> loaded;
+    std::size_t merges=0;
+    for(const auto& expected:fixture.at("sheets")) {
+        const auto name=expected.at("name").get<std::string>();
+        auto data=reader.ReadSheet(path,name,1);
+        REQUIRE(data.merged_ranges.size()==expected.at("merge_count").get<std::size_t>());
+        REQUIRE(data.headers.size()==expected.at("value_last_col").get<std::size_t>());
+        REQUIRE(data.source_excel_row_numbers.size()==data.rows.size());
+        merges+=data.merged_ranges.size(); loaded[name]=std::move(data);
+    }
+    REQUIRE(merges==1118);
+    for(const auto& expected:fixture.at("cells")) {
+        const auto& data=loaded.at(expected.at("sheet").get<std::string>());
+        const auto coordinate=expected.at("coordinate").get<std::string>(); std::size_t split=0,column=0;
+        while(split<coordinate.size() && coordinate[split]>='A' && coordinate[split]<='Z') column=column*26+coordinate[split++]-'A'+1;
+        const auto row=std::stoull(coordinate.substr(split)); std::string actual;
+        if(row==1 && column<=data.headers.size()) actual=data.headers[column-1];
+        else {
+            const auto it=std::find(data.source_excel_row_numbers.begin(),data.source_excel_row_numbers.end(),row);
+            if(it!=data.source_excel_row_numbers.end() && column<=data.headers.size()) actual=data.rows[it-data.source_excel_row_numbers.begin()][column-1];
+        }
+        const auto& value=expected.at("raw_value");
+        const auto wanted=value.is_null()?std::string{}:(value.is_string()?value.get<std::string>():value.dump());
+        if(actual!=wanted) std::cerr << "Coordinate mismatch: " << expected.at("sheet").get<std::string>() << '!' << coordinate << '\n';
+        REQUIRE(actual==wanted);
+    }
+    CorpusViewService service;
+    for(const std::string name:{"通讯","媒体","车控","设置","二次交互","帮助"}) {
+        auto columns=ColumnAnalyzer{}.Analyze(loaded.at(name).headers,loaded.at(name).rows);
+        for(const auto& column:columns) {
+            if(column.header.empty()) REQUIRE(column.role==ColumnRole::Ignore);
+            if(column.header=="说法举例") REQUIRE(column.guessed_language.empty());
+        }
+        auto session=service.CreateSessionFromWorksheet(loaded.at(name),{
+            {5,"参考","F",ColumnRole::Reference,"","",""}, {6,"英语","G",ColumnRole::Play,"en-US","sherpa-vits","voice"}});
+        REQUIRE(!session.view.rows.empty());
+        if(name=="通讯") {
+            const auto original=session.source_rows[0][5];
+            for(std::size_t i=0;i<4;++i) { REQUIRE(session.view.rows[i][1]==original); REQUIRE(session.view.row_meta[i].reference_owner_excel_row==2); service.CycleResult(session,i,3); }
+            service.CycleResult(session,4,3);
+            const auto impact=service.UpdateDisplayCell(session,2,1,"edited reference");
+            REQUIRE(impact.raw_rows.size()==4);
+            for(std::size_t i=0;i<4;++i) { REQUIRE(session.view.rows[i][1]=="edited reference"); REQUIRE(session.view.rows[i][3].empty()); }
+            REQUIRE(!session.view.rows[4][3].empty()); REQUIRE(session.source_rows[2][5].empty());
+            for(std::size_t i=4;i<7;++i) REQUIRE(session.view.rows[i][1]==loaded.at(name).rows[4][5]);
+        }
+    }
+    const auto& history=loaded.at("变更记录");
+    REQUIRE(std::find(history.source_excel_row_numbers.begin(),history.source_excel_row_numbers.end(),10)!=history.source_excel_row_numbers.end());
+    REQUIRE(FileSha256(path)==hash);
+    std::cout << "PASS external original workbook: 13 sheets, 12 visible, 1118 merges, " << fixture.at("cells").size() << " coordinates, six sessions, merged reference edits\n";
+}
+
+void TestEditImpactWhenShapeUnchanged() {
+    CorpusViewService service;
+    auto session=service.CreateSession({{"reference","a1","b1\nb2\nb3"}}, {
+        {0,"Reference","A",ColumnRole::Reference},{1,"English","B",ColumnRole::Play},{2,"Other","C",ColumnRole::Play}});
+    service.CycleResult(session,1,5);
+    const auto impact=service.UpdateDisplayCell(session,0,2,"a1\na2");
+    REQUIRE(session.view.rows.size()==3); REQUIRE(session.view.rows[1][2]=="a2");
+    REQUIRE(impact.segment_structure_changed); REQUIRE(impact.display_rows.size()==3); REQUIRE(!session.view.rows[1][5].empty());
+}
+
 int main() {
     return test::RunTestMain("adayo_p2_tests", [] {
         TestWorkbookReadAndAnalyze();
@@ -571,5 +648,7 @@ int main() {
         TestCorpusViewEditAndResultCycle();
         TestResultIdentitySurvivesEarlierRowStructureEdit();
         TestSyntheticBlankCannotBeEditedOrMarked();
+        TestEditImpactWhenShapeUnchanged();
+        TestExternalReviewWorkbook();
     });
 }

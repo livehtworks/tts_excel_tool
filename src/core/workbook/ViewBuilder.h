@@ -18,7 +18,8 @@ public:
     BuildResult Build(
         const std::vector<std::vector<std::string>>& raw_rows,
         std::vector<SelectedColumn> selected_columns,
-        const std::unordered_map<ResultIdentity, std::string, ResultIdentityHash>& result_marks = {}) const;
+        const std::unordered_map<ResultIdentity, std::string, ResultIdentityHash>& result_marks = {},
+        const std::vector<std::size_t>& reference_owners = {}) const;
 
     static std::vector<std::string> SplitDisplaySegments(const std::string& value);
 };

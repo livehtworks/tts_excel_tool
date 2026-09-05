@@ -14,6 +14,7 @@
 #include <stdexcept>
 
 #include <wx/button.h>
+#include <wx/checkbox.h>
 #include <wx/choice.h>
 #include <wx/filedlg.h>
 #include <wx/grid.h>
@@ -120,6 +121,8 @@ CorpusMappingPanel::CorpusMappingPanel(wxWindow* parent, ApplicationRuntime& run
     sheet_row->Add(batch_role_, 0, wxRIGHT, 6);
     sheet_row->Add(apply_role_button_, 0);
     root->Add(sheet_row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
+    show_hidden_=new wxCheckBox(this,wxID_ANY,WxUtf8("显示隐藏工作表"));
+    root->Add(show_hidden_,0,wxLEFT|wxRIGHT|wxBOTTOM,6);
 
     column_grid_ = new wxGrid(this, wxID_ANY);
     column_grid_->CreateGrid(0, 10);
@@ -143,6 +146,11 @@ CorpusMappingPanel::CorpusMappingPanel(wxWindow* parent, ApplicationRuntime& run
     apply_role_button_->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnApplyRole, this);
     sheet_choice_->Bind(wxEVT_CHOICE, &CorpusMappingPanel::OnSheetChanged, this);
     column_grid_->Bind(wxEVT_GRID_CELL_CHANGED, &CorpusMappingPanel::OnGridCellChanged, this);
+    workbook_path_->Bind(wxEVT_TEXT,[this](wxCommandEvent&) { InvalidateAnalysis(); sheets_.clear(); displayed_sheets_.clear(); sheet_choice_->Clear(); });
+    header_row_->Bind(wxEVT_SPINCTRL,[this](wxCommandEvent&) { InvalidateAnalysis(); });
+    header_row_->Bind(wxEVT_TEXT,[this](wxCommandEvent&) { InvalidateAnalysis(); });
+    show_hidden_->Bind(wxEVT_CHECKBOX,[this](wxCommandEvent&) { InvalidateAnalysis(); RefreshSheetChoices(); });
+    build_button_->Disable(); save_button_->Disable();
 
     SetSizer(root);
 }
@@ -171,21 +179,20 @@ void CorpusMappingPanel::OnLoadSheets(wxCommandEvent&) {
     if (busy_) return;
     const auto path = WorkbookPath();
     const auto last_sheet = runtime_.ConfigSnapshot().last_sheet;
-    analysis_.reset();
-    FillColumnGrid();
+    InvalidateAnalysis();
+    const auto revision=input_revision_;
     SetBusy(true, WxUtf8("读取 Sheet 中"));
-    runtime_.BackgroundJobs().Submit([this, path, last_sheet](std::stop_token token) {
+    runtime_.BackgroundJobs().Submit([this, path, last_sheet, revision](std::stop_token token) {
         try {
             if (token.stop_requested()) return;
-            const auto sheets = runtime_.Workbook().SheetNames(path);
+            const auto sheets = runtime_.Workbook().SheetMetadata(path);
             if (token.stop_requested()) return;
-            CallAfter([this, sheets, last_sheet] {
+            CallAfter([this, sheets, last_sheet, revision] {
                 if (!CanUseUi()) return;
-                sheet_choice_->Clear();
-                for (const auto& name : sheets) {
-                    sheet_choice_->Append(WxUtf8(name));
-                }
-                if (!sheets.empty()) {
+                if(revision!=input_revision_) { SetBusy(false,WxUtf8("输入已变更，请重新读取")); return; }
+                sheets_=sheets;
+                RefreshSheetChoices();
+                if (!displayed_sheets_.empty()) {
                     const auto selected = last_sheet.empty() ? 0 : sheet_choice_->FindString(WxUtf8(last_sheet));
                     sheet_choice_->SetSelection(selected == wxNOT_FOUND ? 0 : selected);
                     wxCommandEvent event;
@@ -205,6 +212,7 @@ void CorpusMappingPanel::OnLoadSheets(wxCommandEvent&) {
 }
 
 void CorpusMappingPanel::OnSheetChanged(wxCommandEvent&) {
+    InvalidateAnalysis();
     if (sheet_choice_->GetSelection() == wxNOT_FOUND) return;
     const auto identity = WorkbookService::WorkbookIdentity(WorkbookPath());
     const auto saved_header = WorkbookService::FindHeaderRow(runtime_.ConfigSnapshot(), identity, SheetName());
@@ -217,21 +225,24 @@ void CorpusMappingPanel::OnAnalyze(wxCommandEvent&) {
 
 void CorpusMappingPanel::AnalyzeCurrentSheet() {
     if (busy_) return;
+    if(sheet_choice_->GetSelection()==wxNOT_FOUND) { status_->SetLabel(WxUtf8("请先读取并选择工作表")); return; }
     const auto path = WorkbookPath();
     const auto sheet = SheetName();
     const auto header_row = static_cast<std::size_t>(header_row_->GetValue());
     const auto config = runtime_.ConfigSnapshot();
-    analysis_.reset();
-    FillColumnGrid();
+    InvalidateAnalysis();
+    const auto revision=input_revision_;
     SetBusy(true, WxUtf8("分析列中"));
-    runtime_.BackgroundJobs().Submit([this, path, sheet, header_row, config](std::stop_token token) {
+    runtime_.BackgroundJobs().Submit([this, path, sheet, header_row, config, revision](std::stop_token token) {
         try {
             if (token.stop_requested()) return;
-            auto analysis = runtime_.Workbook().AnalyzeSheet(path, sheet, header_row, config);
+            auto analysis = runtime_.Workbook().AnalyzeSheet(path, sheet, header_row, config, token);
             if (token.stop_requested()) return;
-            CallAfter([this, analysis = std::move(analysis)]() mutable {
+            CallAfter([this, revision, analysis = std::move(analysis)]() mutable {
                 if (!CanUseUi()) return;
+                if(revision!=input_revision_) { SetBusy(false,WxUtf8("输入已变更，请重新分析")); return; }
                 analysis_ = std::move(analysis);
+                analysis_revision_=revision;
                 FillColumnGrid();
                 SetBusy(false,
                     WxUtf8("已分析：") +
@@ -253,12 +264,13 @@ void CorpusMappingPanel::AnalyzeCurrentSheet() {
 
 void CorpusMappingPanel::OnBuildView(wxCommandEvent&) {
     try {
-        if (!analysis_) {
+        if (!AnalysisMatchesInput()) {
             status_->SetLabel(WxUtf8("请先分析列"));
             return;
         }
         CorpusViewService service;
-        auto session = service.CreateSession(analysis_->worksheet.rows, SelectedColumnsFromGrid());
+        column_grid_->SaveEditControlValue(); column_grid_->DisableCellEditControl();
+        auto session = service.CreateSessionFromWorksheet(analysis_->worksheet, SelectedColumnsFromGrid());
         run_panel_->SetSession(std::move(session));
         status_->SetLabel(WxUtf8("运行视图已生成"));
     } catch (const std::exception& ex) {
@@ -272,10 +284,11 @@ void CorpusMappingPanel::OnSaveMapping(wxCommandEvent&) {
             status_->SetLabel(WxUtf8("当前配置来自未来 schema，拒绝覆盖保存"));
             return;
         }
-        if (!analysis_) {
+        if (!AnalysisMatchesInput()) {
             status_->SetLabel(WxUtf8("请先分析列"));
             return;
         }
+        column_grid_->SaveEditControlValue(); column_grid_->DisableCellEditControl();
         auto columns = analysis_->columns;
         const auto selected = SelectedColumnsFromGrid();
         for (auto& column : columns) {
@@ -302,8 +315,8 @@ void CorpusMappingPanel::OnSaveMapping(wxCommandEvent&) {
         runtime_.UpdateConfig([&](AppConfig& config) {
             WorkbookService::UpsertMapping(config, {analysis_->identity, analysis_->sheet_name, analysis_->worksheet.header_row, columns});
             WorkbookService::UpsertHeaderRow(config, analysis_->identity, analysis_->sheet_name, analysis_->worksheet.header_row);
-            config.last_workbook = PathToUtf8(WorkbookPath());
-            config.last_sheet = SheetName();
+            config.last_workbook = PathToUtf8(analysis_->path);
+            config.last_sheet = analysis_->sheet_name;
         });
         runtime_.SaveConfig();
         status_->SetLabel(WxUtf8("映射已保存"));
@@ -366,8 +379,13 @@ void CorpusMappingPanel::SetBusy(bool busy, const wxString& message) {
     header_row_->Enable(!busy);
     load_button_->Enable(!busy);
     analyze_button_->Enable(!busy);
-    build_button_->Enable(!busy);
-    save_button_->Enable(!busy);
+    bool playable=false;
+    if(!busy && AnalysisMatchesInput() && !analysis_->worksheet.rows.empty()) {
+        try { playable=!SelectedColumnsFromGrid().empty(); } catch(const std::exception&) {}
+    }
+    build_button_->Enable(playable);
+    save_button_->Enable(!busy && AnalysisMatchesInput());
+    show_hidden_->Enable(!busy);
     select_all_button_->Enable(!busy);
     select_none_button_->Enable(!busy);
     batch_role_->Enable(!busy);
@@ -486,6 +504,7 @@ void CorpusMappingPanel::OnGridCellChanged(wxGridEvent& event) {
         ConfigureRowEditors(row);
     }
     if (row >= 0) RefreshRowModelStatus(row);
+    SetBusy(busy_,status_->GetLabel());
     event.Skip();
 }
 
@@ -493,6 +512,7 @@ void CorpusMappingPanel::OnSelectAll(wxCommandEvent&) {
     for (int r = 0; r < column_grid_->GetNumberRows(); ++r) {
         column_grid_->SetCellValue(r, 0, "1");
     }
+    SetBusy(busy_,status_->GetLabel());
 }
 
 void CorpusMappingPanel::OnSelectNone(wxCommandEvent&) {
@@ -500,6 +520,7 @@ void CorpusMappingPanel::OnSelectNone(wxCommandEvent&) {
         column_grid_->SetCellValue(r, 0, "");
         RefreshRowModelStatus(r);
     }
+    SetBusy(busy_,status_->GetLabel());
 }
 
 void CorpusMappingPanel::OnApplyRole(wxCommandEvent&) {
@@ -527,6 +548,7 @@ void CorpusMappingPanel::OnApplyRole(wxCommandEvent&) {
             RefreshRowModelStatus(r);
         }
     }
+    SetBusy(busy_,status_->GetLabel());
 }
 
 std::vector<SelectedColumn> CorpusMappingPanel::SelectedColumnsFromGrid() const {
@@ -573,7 +595,35 @@ std::string CorpusMappingPanel::SheetName() const {
     if (sheet_choice_->GetSelection() == wxNOT_FOUND) {
         throw std::runtime_error("尚未选择 Sheet");
     }
-    return Utf8FromWx(sheet_choice_->GetStringSelection());
+    return displayed_sheets_.at(static_cast<std::size_t>(sheet_choice_->GetSelection()));
+}
+
+void CorpusMappingPanel::InvalidateAnalysis() {
+    ++input_revision_; analysis_.reset();
+    if(column_grid_) FillColumnGrid();
+    if(build_button_) build_button_->Disable();
+    if(save_button_) save_button_->Disable();
+}
+bool CorpusMappingPanel::AnalysisMatchesInput() const {
+    if(!analysis_ || analysis_revision_!=input_revision_) return false;
+    try { return analysis_->identity==WorkbookService::WorkbookIdentity(WorkbookPath()) &&
+        analysis_->sheet_name==SheetName() && analysis_->worksheet.header_row==static_cast<std::size_t>(header_row_->GetValue()); }
+    catch(...) { return false; }
+}
+void CorpusMappingPanel::RefreshSheetChoices() {
+    std::string previous;
+    if(sheet_choice_->GetSelection()!=wxNOT_FOUND) previous=SheetName();
+    sheet_choice_->Clear(); displayed_sheets_.clear();
+    for(const auto& sheet:sheets_) {
+        if(!show_hidden_->GetValue() && sheet.visibility!=SheetVisibility::Visible) continue;
+        auto label=sheet.name;
+        if(sheet.visibility!=SheetVisibility::Visible) label+=sheet.visibility==SheetVisibility::Hidden ? " [hidden]" : " [veryHidden]";
+        sheet_choice_->Append(WxUtf8(label)); displayed_sheets_.push_back(sheet.name);
+    }
+    if(!displayed_sheets_.empty()) {
+        auto found=std::find(displayed_sheets_.begin(),displayed_sheets_.end(),previous);
+        sheet_choice_->SetSelection(found==displayed_sheets_.end()?0:static_cast<int>(found-displayed_sheets_.begin()));
+    }
 }
 
 } // namespace adayo::ui

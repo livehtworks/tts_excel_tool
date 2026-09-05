@@ -41,7 +41,7 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent, ApplicationRuntime& runtime)
       playback_timer_(this) {
     auto* root = new wxBoxSizer(wxVERTICAL);
     auto* top = new wxBoxSizer(wxHORIZONTAL);
-    status_ = new wxStaticText(this, wxID_ANY, WxUtf8("尚未生成运行视图"));
+    status_ = new wxStaticText(this, wxID_ANY, WxUtf8("尚未生成运行视图"),wxDefaultPosition,wxDefaultSize,wxST_ELLIPSIZE_END);
     export_button_ = new wxButton(this, wxID_ANY, WxUtf8("导出 Excel"));
     export_button_->Bind(wxEVT_BUTTON, &CorpusRunPanel::OnExport, this);
     top->Add(status_, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
@@ -255,6 +255,9 @@ void CorpusRunPanel::RefreshGrid() {
     }
     PopulatePlayColumns();
     status_->SetLabel(WxUtf8("运行视图：") + wxString::Format("%d", grid_->GetNumberRows()) + WxUtf8(" 行，") + wxString::Format("%d", grid_->GetNumberCols()) + WxUtf8(" 列"));
+    status_->SetLabel(status_->GetLabel()+WxUtf8(" | "+view.source.path+" | "+view.source.sheet+" | header="+std::to_string(view.source.header_row)));
+    status_->SetToolTip(WxUtf8(view.source.path+"\n"+view.source.sha256));
+    if(!view.diagnostics.empty()) status_->SetLabel(status_->GetLabel()+WxUtf8(" | "+view.diagnostics.front()));
     grid_->Thaw();
     UpdatePlaybackUi();
 }
@@ -465,13 +468,38 @@ void CorpusRunPanel::OnCellChanged(wxGridEvent& event) {
         const auto col = static_cast<std::size_t>(event.GetCol());
         const auto old_row_count = session_->view.rows.size();
         const auto old_col_count = session_->view.headers.size();
-        service_.UpdateDisplayCell(*session_, row, col, Utf8FromWx(grid_->GetCellValue(event.GetRow(), event.GetCol())));
-        if (session_->view.rows.size() != old_row_count || session_->view.headers.size() != old_col_count ||
-            session_->view.columns[col].role == ColumnRole::Reference) {
+        const auto choice=play_column_choice_->GetSelection();
+        const auto play_source=choice>=0 ? session_->view.columns[play_view_columns_.at(choice)].source_index : std::size_t{};
+        auto identity=[&](int display)->std::optional<ResultIdentity> {
+            if(display<0 || static_cast<std::size_t>(display)>=session_->view.row_meta.size()) return {};
+            const auto& meta=session_->view.row_meta[display];
+            const auto segment=meta.segment_indexes.find(play_source);
+            return ResultIdentity{meta.raw_row_index,play_source,segment!=meta.segment_indexes.end() && segment->second ? *segment->second : meta.expanded_index};
+        };
+        const auto first=identity(start_row_->GetValue()-1),last=identity(end_row_->GetValue()-1),cursor=identity(grid_->GetGridCursorRow());
+        const auto cursor_column=grid_->GetGridCursorCol();
+        int scroll_x=0,scroll_y=0; grid_->GetViewStart(&scroll_x,&scroll_y);
+        const auto impact=service_.UpdateDisplayCell(*session_, row, col, Utf8FromWx(grid_->GetCellValue(event.GetRow(), event.GetCol())));
+        if (session_->view.rows.size() != old_row_count || session_->view.headers.size() != old_col_count || impact.segment_structure_changed) {
             RefreshGrid();
+            for(std::size_t i=0;i<play_view_columns_.size();++i) if(session_->view.columns[play_view_columns_[i]].source_index==play_source) play_column_choice_->SetSelection(static_cast<int>(i));
+            auto restore=[&](const std::optional<ResultIdentity>& saved) {
+                int nearest=0;
+                if(!saved) return nearest;
+                for(std::size_t i=0;i<session_->view.row_meta.size();++i) {
+                    const auto& meta=session_->view.row_meta[i];
+                    if(meta.raw_row_index>saved->raw_row_index) break;
+                    nearest=static_cast<int>(i);
+                    if(meta.raw_row_index==saved->raw_row_index && meta.expanded_index>=saved->segment_index) break;
+                }
+                return nearest;
+            };
+            start_row_->SetValue(restore(first)+1); end_row_->SetValue((std::max)(start_row_->GetValue(),restore(last)+1));
+            if(!session_->view.rows.empty() && grid_->GetNumberCols()>0) grid_->SetGridCursor(restore(cursor),std::clamp(cursor_column,0,grid_->GetNumberCols()-1));
+            grid_->Scroll(scroll_x,scroll_y);
         } else {
-            for (std::size_t c = 0; c < session_->view.rows[row].size(); ++c) {
-                grid_->SetCellValue(event.GetRow(), static_cast<int>(c), WxUtf8(session_->view.rows[row][c]));
+            for(auto affected:impact.display_rows) for (std::size_t c = 0; c < session_->view.rows[affected].size(); ++c) {
+                grid_->SetCellValue(static_cast<int>(affected), static_cast<int>(c), WxUtf8(session_->view.rows[affected][c]));
             }
         }
     } catch (const std::exception& ex) {

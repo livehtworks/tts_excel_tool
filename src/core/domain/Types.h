@@ -98,6 +98,18 @@ struct DisplayRowMeta {
     std::size_t raw_row_index{};
     std::size_t expanded_index{};
     std::unordered_map<std::size_t, std::optional<std::size_t>> segment_indexes;
+    std::size_t source_excel_row{};
+    std::optional<std::size_t> reference_owner_raw_row;
+    std::optional<std::size_t> reference_owner_excel_row;
+};
+
+struct WorkbookSource {
+    std::string path, identity, sha256, sheet, imported_at;
+    std::size_t header_row{1};
+};
+struct MergedRange {
+    std::size_t first_row{}, last_row{}, first_column{}, last_column{};
+    std::string reference;
 };
 
 struct RuntimeView {
@@ -105,6 +117,8 @@ struct RuntimeView {
     std::vector<std::vector<std::string>> rows;
     std::vector<SelectedColumn> columns;
     std::vector<DisplayRowMeta> row_meta;
+    WorkbookSource source;
+    std::vector<std::string> diagnostics;
 };
 
 struct TextRecord {

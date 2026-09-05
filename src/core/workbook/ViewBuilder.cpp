@@ -39,7 +39,8 @@ std::vector<std::string> ViewBuilder::SplitDisplaySegments(const std::string& va
 ViewBuilder::BuildResult ViewBuilder::Build(
     const std::vector<std::vector<std::string>>& raw_rows,
     std::vector<SelectedColumn> selected_columns,
-    const std::unordered_map<ResultIdentity, std::string, ResultIdentityHash>& result_marks) const {
+    const std::unordered_map<ResultIdentity, std::string, ResultIdentityHash>& result_marks,
+    const std::vector<std::size_t>& reference_owners) const {
 
     selected_columns.erase(
         std::remove_if(selected_columns.begin(), selected_columns.end(),
@@ -72,7 +73,9 @@ ViewBuilder::BuildResult ViewBuilder::Build(
         for (const auto& c : selected_columns) {
             const std::string value = c.source_index < raw.size() ? raw[c.source_index] : std::string{};
             if (c.role == ColumnRole::Reference) {
-                refs[c.source_index] = value;
+                const auto owner=raw_idx<reference_owners.size() ? reference_owners[raw_idx] : raw_idx;
+                if(owner>=raw_rows.size()) throw std::invalid_argument("Reference owner is out of range");
+                refs[c.source_index] = c.source_index<raw_rows[owner].size() ? raw_rows[owner][c.source_index] : std::string{};
             } else if (c.role == ColumnRole::Play) {
                 auto segments = SplitDisplaySegments(value);
                 max_lines = std::max(max_lines, segments.size());

@@ -1,6 +1,9 @@
 #include "adapters/excel/OpenXlsxWorkbookReader.h"
 
 #include "platform/UnicodePath.h"
+#include "platform/FileIo.h"
+#include <chrono>
+#include <map>
 
 #include <algorithm>
 #include <filesystem>
@@ -76,7 +79,21 @@ std::vector<std::string> OpenXlsxWorkbookReader::SheetNames(const std::filesyste
 #endif
 }
 
-WorksheetData OpenXlsxWorkbookReader::ReadSheet(const std::filesystem::path& path, const std::string& sheet, std::size_t header_row) {
+std::vector<WorksheetInfo> OpenXlsxWorkbookReader::SheetMetadata(const std::filesystem::path& path) {
+#ifdef ADAYO_HAS_OPENXLSX
+    ReadOnlyDocument doc(path); std::vector<WorksheetInfo> result;
+    for(const auto& name:doc.get().workbook().worksheetNames()) {
+        const auto state=doc.get().workbook().worksheet(name).visibility();
+        result.push_back({name,state==OpenXLSX::XLSheetState::Visible ? SheetVisibility::Visible :
+            (state==OpenXLSX::XLSheetState::Hidden ? SheetVisibility::Hidden : SheetVisibility::VeryHidden)});
+    }
+    return result;
+#else
+    (void)path; throw std::runtime_error("OpenXLSX unavailable");
+#endif
+}
+
+WorksheetData OpenXlsxWorkbookReader::ReadSheet(const std::filesystem::path& path, const std::string& sheet, std::size_t header_row, std::stop_token token) {
 #ifdef ADAYO_HAS_OPENXLSX
     if (header_row == 0) {
         throw std::invalid_argument("Excel 表头行号必须从 1 开始");
@@ -89,46 +106,52 @@ WorksheetData OpenXlsxWorkbookReader::ReadSheet(const std::filesystem::path& pat
     }
 
     auto worksheet = workbook.worksheet(sheet);
-    const auto row_count = worksheet.rowCount();
-    const auto column_count = worksheet.columnCount();
-    if (row_count == 0 || column_count == 0 || header_row > row_count) {
-        return WorksheetData{{}, {}, header_row};
-    }
-
     WorksheetData data;
     data.header_row = header_row;
-    data.headers.reserve(column_count);
-    for (uint16_t column = 1; column <= column_count; ++column) {
-        data.headers.push_back(CellToString(worksheet.findCell(static_cast<uint32_t>(header_row), column)));
+    data.source={PathToUtf8(std::filesystem::absolute(path)),{},FileSha256(path),sheet,
+        std::to_string(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())),header_row};
+    auto& merges=worksheet.merges();
+    if(merges.count()>1000000) throw std::runtime_error("Workbook merge count exceeds resource budget");
+    for(std::size_t i=0;i<merges.count();++i) {
+        const std::string ref=merges.merge(static_cast<OpenXLSX::XLMergeIndex>(i));
+        const auto colon=ref.find(':');
+        OpenXLSX::XLCellReference first(ref.substr(0,colon)), last(colon==std::string::npos ? ref : ref.substr(colon+1));
+        data.merged_ranges.push_back({first.row(),last.row(),first.column(),last.column(),ref});
     }
-
-    std::vector<std::vector<std::string>> rows;
-    std::size_t last_meaningful_column = 0;
-    for (std::size_t i = 0; i < data.headers.size(); ++i) {
-        if (!data.headers[i].empty()) last_meaningful_column = i + 1;
-    }
-    for (uint32_t row_number = static_cast<uint32_t>(header_row + 1); row_number <= row_count; ++row_number) {
-        std::vector<std::string> row;
-        row.reserve(column_count);
-        for (uint16_t column = 1; column <= column_count; ++column) {
-            row.push_back(CellToString(worksheet.findCell(row_number, column)));
-            if (!row.back().empty()) {
-                last_meaningful_column = (std::max)(last_meaningful_column, static_cast<std::size_t>(column));
-            }
+    std::map<std::size_t,std::map<std::size_t,std::string>> sparse;
+    std::size_t max_column=0, visited=0, text_bytes=0, value_count=0;
+    auto range=worksheet.rows();
+    for(auto it=range.begin();it!=range.end();++it) {
+        if(token.stop_requested()) throw std::runtime_error("Workbook import canceled");
+        if(!it.rowExists() || it.rowNumber()<header_row) continue;
+        auto row=*it;
+        const auto count=static_cast<std::size_t>(row.cellCount());
+        if(count>16384 || visited>16000000-count) throw std::runtime_error("Workbook cell traversal exceeds resource budget");
+        visited+=count;
+        for(std::size_t c=1;c<=count;++c) {
+            if((c%256)==0 && token.stop_requested()) throw std::runtime_error("Workbook import canceled");
+            auto value=CellToString(worksheet.findCell(row.rowNumber(),static_cast<std::uint16_t>(c)));
+            if(value.empty()) continue;
+            if(value.find('\0')!=std::string::npos) throw std::runtime_error("Embedded NUL in workbook cell");
+            if(value.size()>64*1024*1024-text_bytes) throw std::runtime_error("Workbook text exceeds 64MiB budget");
+            if(++value_count>(512ull*1024*1024-2*text_bytes)/192) throw std::runtime_error("Workbook sparse values exceed memory budget");
+            text_bytes+=value.size(); max_column=(std::max)(max_column,c);
+            sparse[row.rowNumber()][c]=std::move(value);
         }
-        const bool empty = std::all_of(row.begin(), row.end(), [](const std::string& value) { return value.empty(); });
-        if (!empty) {
-            rows.push_back(std::move(row));
-        }
     }
-    data.headers.resize(last_meaningful_column);
-    for (auto& row : rows) {
-        row.resize(last_meaningful_column);
-        data.rows.push_back(std::move(row));
+    constexpr std::size_t budget=512ull*1024*1024;
+    if(max_column && sparse.size()>(budget-2*text_bytes)/(sizeof(std::string)*max_column+sizeof(std::vector<std::string>)))
+        throw std::runtime_error("Workbook rectangular output exceeds 512MiB budget");
+    data.headers.resize(max_column);
+    for(auto& [row_number,values]:sparse) {
+        std::vector<std::string> row(max_column);
+        for(auto& [column,value]:values) row[column-1]=std::move(value);
+        if(row_number==header_row) data.headers=std::move(row);
+        else { data.source_excel_row_numbers.push_back(row_number); data.rows.push_back(std::move(row)); }
     }
     return data;
 #else
-    (void)path; (void)sheet; (void)header_row;
+    (void)path; (void)sheet; (void)header_row; (void)token;
     throw std::runtime_error("当前构建未启用 OpenXLSX");
 #endif
 }

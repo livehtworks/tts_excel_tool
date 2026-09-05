@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <numeric>
+#include <map>
 
 namespace adayo {
 namespace {
@@ -21,13 +23,54 @@ CorpusSession CorpusViewService::CreateSession(
     return session;
 }
 
+CorpusSession CorpusViewService::CreateSessionFromWorksheet(WorksheetData worksheet, std::vector<SelectedColumn> selected_columns) const {
+    CorpusSession session;
+    session.source_rows=std::move(worksheet.rows); session.selected_columns=std::move(selected_columns);
+    session.source_excel_row_numbers=std::move(worksheet.source_excel_row_numbers);
+    session.merged_ranges=std::move(worksheet.merged_ranges); session.source=std::move(worksheet.source);
+    if(session.source_excel_row_numbers.size()!=session.source_rows.size()) throw std::invalid_argument("Worksheet source row mapping mismatch");
+    session.reference_owners.resize(session.source_rows.size());
+    std::iota(session.reference_owners.begin(),session.reference_owners.end(),0);
+    const auto reference=std::find_if(session.selected_columns.begin(),session.selected_columns.end(),[](const auto& c){return c.role==ColumnRole::Reference;});
+    if(reference!=session.selected_columns.end()) {
+        const auto column=reference->source_index;
+        std::map<std::size_t,std::size_t> indexes;
+        for(std::size_t i=0;i<session.source_excel_row_numbers.size();++i) indexes[session.source_excel_row_numbers[i]]=i;
+        std::vector<bool> projected(session.source_rows.size());
+        for(const auto& merge:session.merged_ranges) {
+            if(column+1<merge.first_column || column+1>merge.last_column) continue;
+            if(merge.first_column!=merge.last_column) { session.diagnostics.push_back("Cross-column merge not projected: "+merge.reference); continue; }
+            const auto anchor=indexes.find(merge.first_row);
+            bool valid=anchor!=indexes.end() && merge.first_row>session.source.header_row && merge.first_row<=merge.last_row;
+            std::vector<std::size_t> covered;
+            const std::string value=valid && column<session.source_rows[anchor->second].size() ? session.source_rows[anchor->second][column] : std::string{};
+            if(value.empty()) valid=false;
+            for(auto it=indexes.lower_bound(merge.first_row);it!=indexes.end() && it->first<=merge.last_row;++it) {
+                const auto row=it->second; covered.push_back(row);
+                if(projected[row] || (column<session.source_rows[row].size() && !session.source_rows[row][column].empty() && session.source_rows[row][column]!=value)) valid=false;
+            }
+            if(!valid) { session.diagnostics.push_back("Invalid reference merge not projected: "+merge.reference); continue; }
+            for(auto row:covered) { session.reference_owners[row]=anchor->second; projected[row]=true; }
+        }
+    }
+    Rebuild(session); return session;
+}
+
 void CorpusViewService::Rebuild(CorpusSession& session) const {
-    auto built = builder_.Build(session.source_rows, session.selected_columns, session.result_marks);
+    auto built = builder_.Build(session.source_rows, session.selected_columns, session.result_marks, session.reference_owners);
     session.view = std::move(built.view);
+    session.view.source=session.source; session.view.diagnostics=session.diagnostics;
+    for(auto& meta:session.view.row_meta) {
+        if(meta.raw_row_index<session.source_excel_row_numbers.size()) meta.source_excel_row=session.source_excel_row_numbers[meta.raw_row_index];
+        if(meta.raw_row_index<session.reference_owners.size()) {
+            const auto owner=session.reference_owners[meta.raw_row_index]; meta.reference_owner_raw_row=owner;
+            if(owner<session.source_excel_row_numbers.size()) meta.reference_owner_excel_row=session.source_excel_row_numbers[owner];
+        }
+    }
     session.selected_columns = std::move(built.selected_columns);
 }
 
-void CorpusViewService::UpdateDisplayCell(
+CellEditImpact CorpusViewService::UpdateDisplayCell(
     CorpusSession& session,
     std::size_t display_row,
     std::size_t display_column,
@@ -40,19 +83,30 @@ void CorpusViewService::UpdateDisplayCell(
         throw std::out_of_range("显示列越界");
     }
 
-    const auto& view_column = session.view.columns[display_column];
-    const auto& meta = session.view.row_meta[display_row];
+    if(value.find('\0')!=std::string::npos) throw std::invalid_argument("Embedded NUL in edited text");
+    const auto view_column = session.view.columns[display_column];
+    const auto meta = session.view.row_meta[display_row];
+    CellEditImpact impact;
+    impact.raw_rows.push_back(meta.raw_row_index);
+    auto finish=[&]() {
+        for(std::size_t row=0;row<session.view.row_meta.size();++row)
+            if(std::find(impact.raw_rows.begin(),impact.raw_rows.end(),session.view.row_meta[row].raw_row_index)!=impact.raw_rows.end()) impact.display_rows.push_back(row);
+        return impact;
+    };
     if (meta.raw_row_index >= session.source_rows.size()) {
         throw std::out_of_range("源行越界");
     }
     if (view_column.role == ColumnRole::Index || view_column.role == ColumnRole::Result) {
-        return;
+        return finish();
     }
     if (view_column.source_index >= session.source_rows[meta.raw_row_index].size()) {
         session.source_rows[meta.raw_row_index].resize(view_column.source_index + 1);
     }
 
-    auto& source_cell = session.source_rows[meta.raw_row_index][view_column.source_index];
+    const auto owner=view_column.role==ColumnRole::Reference && meta.raw_row_index<session.reference_owners.size()
+        ? session.reference_owners[meta.raw_row_index] : meta.raw_row_index;
+    if(view_column.source_index>=session.source_rows[owner].size()) session.source_rows[owner].resize(view_column.source_index+1);
+    auto& source_cell = session.source_rows[owner][view_column.source_index];
     if (view_column.role == ColumnRole::Play) {
         auto segment_it = meta.segment_indexes.find(view_column.source_index);
         if (segment_it == meta.segment_indexes.end() || !segment_it->second.has_value()) {
@@ -73,17 +127,22 @@ void CorpusViewService::UpdateDisplayCell(
             }
             if (new_segments.size() == old_size) {
                 Rebuild(session);
-                return;
+                return finish();
             }
             InvalidateResultsFromSegment(session, meta.raw_row_index, view_column.source_index, segment_index);
+            impact.segment_structure_changed=true;
             Rebuild(session);
-            return;
+            return finish();
         }
     } else {
         const bool changed = source_cell != value;
         source_cell = value;
         if (changed && view_column.role == ColumnRole::Reference) {
-            InvalidateResultsForRawRow(session, meta.raw_row_index);
+            impact.raw_rows.clear();
+            for(std::size_t row=0;row<session.source_rows.size();++row) {
+                const auto candidate=row<session.reference_owners.size() ? session.reference_owners[row] : row;
+                if(candidate==owner) { InvalidateResultsForRawRow(session,row); impact.raw_rows.push_back(row); }
+            }
         }
         for (std::size_t row = 0; row < session.view.row_meta.size(); ++row) {
             if (session.view.row_meta[row].raw_row_index == meta.raw_row_index) {
@@ -93,7 +152,7 @@ void CorpusViewService::UpdateDisplayCell(
         if (changed && view_column.role == ColumnRole::Reference) {
             Rebuild(session);
         }
-        return;
+        return finish();
     }
 }
 

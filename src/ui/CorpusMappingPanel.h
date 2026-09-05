@@ -10,6 +10,7 @@
 #include <wx/panel.h>
 
 class wxButton;
+class wxCheckBox;
 class wxChoice;
 class wxGrid;
 class wxGridEvent;
@@ -56,6 +57,13 @@ private:
     std::vector<SelectedColumn> SelectedColumnsFromGrid() const;
     std::filesystem::path WorkbookPath() const;
     std::string SheetName() const;
+    void InvalidateAnalysis();
+    bool AnalysisMatchesInput() const;
+    void RefreshSheetChoices();
+    std::uint64_t input_revision_{}, analysis_revision_{};
+    std::vector<WorksheetInfo> sheets_;
+    std::vector<std::string> displayed_sheets_;
+    wxCheckBox* show_hidden_{};
 
     ApplicationRuntime& runtime_;
     CorpusRunPanel* run_panel_{};

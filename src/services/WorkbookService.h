@@ -26,11 +26,12 @@ public:
     explicit WorkbookService(std::unique_ptr<IWorkbookReader> reader);
 
     std::vector<std::string> SheetNames(const std::filesystem::path& path) const;
+    std::vector<WorksheetInfo> SheetMetadata(const std::filesystem::path& path) const;
     WorkbookAnalysis AnalyzeSheet(
         const std::filesystem::path& path,
         const std::string& sheet_name,
         std::size_t header_row,
-        const AppConfig& config = {}) const;
+        const AppConfig& config = {}, std::stop_token token = {}) const;
 
     static std::string WorkbookIdentity(const std::filesystem::path& path);
     static std::optional<SheetMappingConfig> FindMapping(
