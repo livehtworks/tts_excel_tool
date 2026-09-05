@@ -131,7 +131,7 @@ ComparePanel::ComparePanel(wxWindow* parent, ApplicationRuntime& runtime)
         comparison_cancel_.request_stop(); cancel_button_->Disable(); SetStatus(WxUtf8("正在取消"));
     });
     export_button_=new wxButton(this,wxID_ANY,WxUtf8("导出 Excel"));
-    status_=new wxStaticText(this,wxID_ANY,WxUtf8("就绪"),wxDefaultPosition,wxDefaultSize,wxST_ELLIPSIZE_END);
+    status_=new wxStaticText(this,wxID_ANY,WxUtf8("就绪"),wxDefaultPosition,wxDefaultSize,wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE);
     status_->SetMinSize(wxSize(0,-1));
     compare_button_->Bind(wxEVT_BUTTON,&ComparePanel::OnCompare,this);
     export_button_->Bind(wxEVT_BUTTON,&ComparePanel::OnExport,this);

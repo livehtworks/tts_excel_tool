@@ -78,6 +78,7 @@ private:
     wxTimer playback_timer_;
     bool export_busy_{false};
     bool closing_{false};
+    PlaybackState last_playback_state_{PlaybackState::Idle};
     std::uint64_t playback_ui_generation_{0};
 };
 

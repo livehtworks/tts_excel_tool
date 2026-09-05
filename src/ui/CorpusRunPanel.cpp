@@ -41,7 +41,7 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent, ApplicationRuntime& runtime)
       playback_timer_(this) {
     auto* root = new wxBoxSizer(wxVERTICAL);
     auto* top = new wxBoxSizer(wxHORIZONTAL);
-    status_ = new wxStaticText(this, wxID_ANY, WxUtf8("尚未生成运行视图"),wxDefaultPosition,wxDefaultSize,wxST_ELLIPSIZE_END);
+    status_ = new wxStaticText(this, wxID_ANY, WxUtf8("尚未生成运行视图"),wxDefaultPosition,wxDefaultSize,wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE);
     status_->SetMinSize(wxSize(0,-1));
     export_button_ = new wxButton(this, wxID_ANY, WxUtf8("导出 Excel"));
     export_button_->Bind(wxEVT_BUTTON, &CorpusRunPanel::OnExport, this);
@@ -55,7 +55,7 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent, ApplicationRuntime& runtime)
     cache_limit_=new wxSpinCtrl(this,wxID_ANY);
     cache_limit_->SetRange(128,16384);
     cache_limit_->SetValue(static_cast<int>(runtime_.ConfigSnapshot().audio_cache.disk_limit_bytes/(1024*1024)));
-    cache_status_=new wxStaticText(this,wxID_ANY,wxString{},wxDefaultPosition,wxDefaultSize,wxST_ELLIPSIZE_END);
+    cache_status_=new wxStaticText(this,wxID_ANY,wxString{},wxDefaultPosition,wxDefaultSize,wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE);
     cache_status_->SetMinSize(wxSize(0,-1));
     clear_cache_=new wxButton(this,wxID_ANY,WxUtf8("清空音频缓存"));
     cache_bar->Add(cache_enabled_,0,wxALIGN_CENTER_VERTICAL|wxRIGHT,6);
@@ -401,9 +401,10 @@ void CorpusRunPanel::UpdatePlaybackUi() {
 
     if (playback_ && state == PlaybackState::Error) {
         status_->SetLabel(WxUtf8(playback_->LastError()));
-    } else if (playback_ && busy) {
+    } else if (playback_ && (busy || state != last_playback_state_)) {
         status_->SetLabel(WxUtf8("播放状态：") + StateText(state));
     }
+    last_playback_state_ = state;
 }
 
 void CorpusRunPanel::OnPlay(wxCommandEvent&) {
