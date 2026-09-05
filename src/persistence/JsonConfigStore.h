@@ -14,6 +14,7 @@ enum class ConfigLoadStatus {
     CorruptBackedUp,
     CorruptBackupFailed,
     FutureSchema,
+    InvalidValues,
 };
 
 struct ConfigLoadResult {

@@ -13,6 +13,7 @@
 #include <wx/panel.h>
 
 class wxButton;
+class wxCheckBox;
 class wxChoice;
 class wxGrid;
 class wxGridEvent;
@@ -50,6 +51,11 @@ private:
     void OnPlaybackSettingsChanged(wxCommandEvent& event);
     void OnCellChanged(wxGridEvent& event);
     void OnCellClick(wxGridEvent& event);
+    void UpdateCacheUi();
+    wxCheckBox* cache_enabled_{};
+    wxSpinCtrl* cache_limit_{};
+    wxStaticText* cache_status_{};
+    wxButton* clear_cache_{};
 
     ApplicationRuntime& runtime_;
     CorpusViewService service_;

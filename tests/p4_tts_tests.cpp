@@ -1,6 +1,10 @@
 #include "adapters/tts/SherpaOnnxTtsEngine.h"
 #include "services/ModelRegistry.h"
 #include "services/TtsService.h"
+#include "platform/FileIo.h"
+#include "platform/UnicodePath.h"
+#include <fstream>
+#include <nlohmann/json.hpp>
 
 #include "TestCheck.h"
 
@@ -174,7 +178,39 @@ void TestSherpaUnicodePathGate() {
 }
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if(argc==6 && std::string(argv[1])=="--cache-probe") {
+        return test::RunTestMain("adayo_p4_real_cache_probe",[&] {
+            const auto root=PathFromUtf8(argv[2]);
+            const auto mode=std::string(argv[3]), language=std::string(argv[4]);
+            std::ifstream input(PathFromUtf8(argv[5])); const auto fixture=nlohmann::json::parse(input);
+            ModelRegistry registry(std::filesystem::path(ADAYO_MODELS_DIR)/"sherpa");
+            const auto entries=registry.ScanSherpaModels();
+            const auto& model=language=="zh-CN" ? FindId(entries,"vits-piper-zh_CN-xiao_ya-medium-int8") : FindLanguage(entries,language);
+            TtsService service; service.SetEngine(std::make_unique<SherpaOnnxTtsEngine>());
+            AudioCacheOptions options; options.enabled=mode!="baseline";
+            service.InitializeCache(root/language/"tts-v1",options);
+            REQUIRE(service.Cache()->Stats().disk_enabled);
+            if(mode=="baseline") service.EnsureModelLoaded(model.id,model.config);
+            std::cout << "request_id,language,mode,key_build_ms,model_validation_ms,lookup_ms,model_load_ms,synth_ms,cache_read_ms,cache_write_ms,audio_prepare_ms,source,load_call_delta,synth_call_delta,pcm_sha256\n";
+            std::size_t index=0;
+            for(const auto& sample:fixture.at("samples")) {
+                if(sample.at("language_code").get<std::string>()!=language) continue;
+                TtsRequest request{sample.at("text").get<std::string>(),language,model.config.speaker_id,1.0};
+                auto result=service.Prepare(model.id,model.config,request);
+                if(mode=="memory") result=service.Prepare(model.id,model.config,request);
+                RequireUsableAudio(*result.audio);
+                if(mode=="memory" || mode=="disk") {
+                    REQUIRE(result.timings.source==mode); REQUIRE(result.timings.load_call_delta==0); REQUIRE(result.timings.synth_call_delta==0);
+                } else { REQUIRE(result.timings.source=="synth"); REQUIRE(result.timings.load_call_delta==0); }
+                const auto& t=result.timings;
+                const auto hash=Sha256(std::string_view(reinterpret_cast<const char*>(result.audio->samples.data()),result.audio->samples.size()*sizeof(float)));
+                std::cout << index++ << ',' << language << ',' << mode << ',' << t.key_build_ms << ',' << t.model_validation_ms << ',' << t.lookup_ms << ',' << t.model_load_ms << ','
+                    << t.synth_ms << ',' << t.cache_read_ms << ',' << t.cache_write_ms << ',' << t.audio_prepare_ms << ',' << t.source << ',' << t.load_call_delta << ',' << t.synth_call_delta << ',' << hash << '\n';
+            }
+            REQUIRE(index>=20);
+        });
+    }
     return test::RunTestMain("adayo_p4_tts_tests", [] {
         TestSherpaSmokeAndSwitching();
         TestSherpaRepeatedGeneration();

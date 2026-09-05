@@ -43,6 +43,14 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 
 ## OpenXLSX
 
+## Audio Cache / Windows IO
+
+- Close the metadata input stream before atomically replacing that metadata file: Windows open handles without delete sharing prevent replacement.
+- Cache LRU timestamps must distinguish successive operations within one clock tick; timestamp ties must not evict a more recent entry by hash ordering.
+- Cache acceptance uses fresh external roots. Do not run fault/clear/quota tests against the application's established cache or model directory.
+
+## OpenXLSX
+
 - OpenXLSX 0.5.1 only exposes `XLDocument::open(const std::string&)` in the tested package.
 - `OpenXlsxWorkbookReader` converts the native `std::filesystem::path` to UTF-8 only at the OpenXLSX API boundary and opens the requested workbook directly. Do not reintroduce `%TEMP%` staging for Unicode paths.
 

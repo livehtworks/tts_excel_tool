@@ -13,6 +13,7 @@ public:
     ~SherpaOnnxTtsEngine() override;
 
     std::string Id() const override { return "sherpa-vits"; }
+    std::string RuntimeIdentity() const override;
     bool IsLoaded() const noexcept override;
     void Load(const TtsModelConfig& config) override;
     void Unload() noexcept override;

@@ -1,6 +1,8 @@
 #include "persistence/JsonConfigStore.h"
 
 #include "platform/UnicodePath.h"
+#include "platform/FileIo.h"
+#include <mutex>
 
 #include <chrono>
 #include <fstream>
@@ -22,7 +24,15 @@ namespace adayo {
 using nlohmann::json;
 
 namespace {
-constexpr int kCurrentSchemaVersion = 3;
+constexpr int kCurrentSchemaVersion = 4;
+class ConfigValidationError final : public std::runtime_error {
+public: using std::runtime_error::runtime_error;
+};
+void ValidateCacheConfig(const AudioCacheOptions& value) {
+    if (value.memory_limit_bytes!=64ull*1024*1024 || value.disk_limit_bytes<128ull*1024*1024 ||
+        value.disk_limit_bytes>16384ull*1024*1024 || value.entry_limit!=20000)
+        throw ConfigValidationError("Invalid audio_cache limits (memory 64MiB, disk 128-16384MiB, entries 20000)");
+}
 
 class FutureSchemaError final : public std::runtime_error {
 public:
@@ -203,8 +213,11 @@ void from_json(const json& j, SheetMappingConfig& mapping) {
 }
 
 void to_json(json& j, const AppConfig& config) {
+    ValidateCacheConfig(config.audio_cache);
     j = json{
         {"schema_version", kCurrentSchemaVersion},
+        {"audio_cache", {{"enabled",config.audio_cache.enabled},{"memory_limit_bytes",config.audio_cache.memory_limit_bytes},
+            {"disk_limit_bytes",config.audio_cache.disk_limit_bytes},{"entry_limit",config.audio_cache.entry_limit}}},
         {"last_workbook", config.last_workbook},
         {"last_sheet", config.last_sheet},
         {"speech_rate", config.speech_rate},
@@ -221,6 +234,16 @@ void from_json(const json& j, AppConfig& config) {
         throw FutureSchemaError("配置 schema_version 来自未来版本，拒绝读取");
     }
     config.schema_version = kCurrentSchemaVersion;
+    if (j.contains("audio_cache")) {
+        try {
+            const auto& value=j.at("audio_cache");
+            config.audio_cache.enabled=value.value("enabled",true);
+            config.audio_cache.memory_limit_bytes=value.value("memory_limit_bytes",64ull*1024*1024);
+            config.audio_cache.disk_limit_bytes=value.value("disk_limit_bytes",2048ull*1024*1024);
+            config.audio_cache.entry_limit=value.value("entry_limit",std::size_t{20000});
+            ValidateCacheConfig(config.audio_cache);
+        } catch (const std::exception& ex) { throw ConfigValidationError(ex.what()); }
+    }
     config.last_workbook = j.value("last_workbook", std::string{});
     config.last_sheet = j.value("last_sheet", std::string{});
     config.speech_rate = j.value("speech_rate", 1.0);
@@ -279,6 +302,11 @@ ConfigLoadResult JsonConfigStore::LoadOrDefault() const {
         result.allow_save = false;
         result.message = ex.what();
         return result;
+    } catch (const ConfigValidationError& ex) {
+        result.status = ConfigLoadStatus::InvalidValues;
+        result.allow_save = false;
+        result.message = ex.what();
+        return result;
     } catch (const std::exception& ex) {
         const auto backup = CorruptBackupPath(path_);
         std::error_code ec;
@@ -297,32 +325,16 @@ ConfigLoadResult JsonConfigStore::LoadOrDefault() const {
 }
 
 void JsonConfigStore::Save(const AppConfig& config) const {
+    static std::mutex save_mutex;
+    std::lock_guard lock(save_mutex);
     if (path_.has_parent_path()) {
         std::filesystem::create_directories(path_.parent_path());
     }
     RejectUnsafeExistingTarget(path_);
 
     json document = config;
-    auto temp = path_;
-    temp += ".tmp-" + Timestamp();
-    try {
-        {
-            std::ofstream output(temp, std::ios::binary | std::ios::trunc);
-            if (!output) {
-                throw std::runtime_error("无法写入配置临时文件");
-            }
-            output << document.dump(2);
-            output.flush();
-            if (!output) {
-                throw std::runtime_error("配置临时文件 flush 失败");
-            }
-        }
-        AtomicReplace(temp, path_);
-    } catch (...) {
-        std::error_code ec;
-        std::filesystem::remove(temp, ec);
-        throw;
-    }
+    const auto serialized=document.dump(2);
+    WriteBinaryFileAtomically(path_,serialized.data(),serialized.size());
 }
 
 } // namespace adayo

@@ -9,6 +9,8 @@
 #include <stdexcept>
 
 #include <wx/button.h>
+#include <wx/checkbox.h>
+#include <wx/msgdlg.h>
 #include <wx/choice.h>
 #include <wx/filedlg.h>
 #include <wx/grid.h>
@@ -45,6 +47,55 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent, ApplicationRuntime& runtime)
     top->Add(status_, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     top->Add(export_button_, 0);
     root->Add(top, 0, wxEXPAND | wxALL, 6);
+
+    auto* cache_bar=new wxBoxSizer(wxHORIZONTAL);
+    cache_enabled_=new wxCheckBox(this,wxID_ANY,WxUtf8("音频缓存"));
+    cache_enabled_->SetValue(runtime_.ConfigSnapshot().audio_cache.enabled);
+    cache_limit_=new wxSpinCtrl(this,wxID_ANY);
+    cache_limit_->SetRange(128,16384);
+    cache_limit_->SetValue(static_cast<int>(runtime_.ConfigSnapshot().audio_cache.disk_limit_bytes/(1024*1024)));
+    cache_status_=new wxStaticText(this,wxID_ANY,wxString{});
+    clear_cache_=new wxButton(this,wxID_ANY,WxUtf8("清空音频缓存"));
+    cache_bar->Add(cache_enabled_,0,wxALIGN_CENTER_VERTICAL|wxRIGHT,6);
+    cache_bar->Add(new wxStaticText(this,wxID_ANY,WxUtf8("磁盘上限(MiB)")),0,wxALIGN_CENTER_VERTICAL|wxRIGHT,4);
+    cache_bar->Add(cache_limit_,0,wxRIGHT,6);
+    cache_bar->Add(cache_status_,1,wxALIGN_CENTER_VERTICAL|wxRIGHT,6);
+    cache_bar->Add(clear_cache_,0);
+    root->Add(cache_bar,0,wxEXPAND|wxLEFT|wxRIGHT|wxBOTTOM,6);
+    auto configure_cache=[this](wxCommandEvent&) {
+        auto options=runtime_.ConfigSnapshot().audio_cache;
+        options.enabled=cache_enabled_->GetValue();
+        options.disk_limit_bytes=static_cast<std::uint64_t>(cache_limit_->GetValue())*1024*1024;
+        cache_enabled_->Disable(); cache_limit_->Disable();
+        runtime_.BackgroundJobs().Submit([this,options](std::stop_token token) {
+            std::string error;
+            try {
+                if (token.stop_requested()) return;
+                runtime_.Tts().Cache()->Configure(options);
+                runtime_.UpdateConfig([&](AppConfig& config){config.audio_cache=options;});
+                runtime_.SaveConfig();
+            } catch(const std::exception& ex) { error=ex.what(); runtime_.Logger().Warn("cache",error); }
+            CallAfter([this,error] {
+                if(closing_) return;
+                cache_enabled_->Enable(); cache_limit_->Enable();
+                cache_enabled_->SetValue(runtime_.ConfigSnapshot().audio_cache.enabled);
+                cache_limit_->SetValue(static_cast<int>(runtime_.Tts().Cache()->Stats().active_limit/(1024*1024)));
+                UpdateCacheUi(); if(!error.empty()) cache_status_->SetLabel(WxUtf8(error));
+            });
+        });
+    };
+    cache_enabled_->Bind(wxEVT_CHECKBOX,configure_cache);
+    cache_limit_->Bind(wxEVT_SPINCTRL,configure_cache);
+    clear_cache_->Bind(wxEVT_BUTTON,[this](wxCommandEvent&) {
+        if(wxMessageBox(WxUtf8("只清本工具的音频缓存，不删除模型、配置或结果，不中断已开始的声音。确认清空？"),WxUtf8("清空音频缓存"),wxYES_NO|wxNO_DEFAULT|wxICON_QUESTION,this)!=wxYES) return;
+        runtime_.Tts().Cache()->BeginClear();
+        clear_cache_->Disable(); cache_status_->SetLabel(WxUtf8("清理已排队"));
+        runtime_.BackgroundJobs().Submit([this](std::stop_token) {
+            runtime_.Tts().Cache()->FinishClear();
+            CallAfter([this] { if(closing_) return; clear_cache_->Enable(); UpdateCacheUi(); });
+        });
+    });
+    UpdateCacheUi();
 
     auto* playback_bar = new wxBoxSizer(wxHORIZONTAL);
     play_column_choice_ = new wxChoice(this, wxID_ANY);
@@ -140,6 +191,14 @@ void CorpusRunPanel::BeginShutdown() {
     playback_timer_.Stop();
     if (playback_) playback_->Stop();
     Disable();
+}
+
+void CorpusRunPanel::UpdateCacheUi() {
+    if(!runtime_.Tts().Cache()) return;
+    const auto stats=runtime_.Tts().Cache()->Stats();
+    const auto label=std::to_string(stats.used_bytes/(1024*1024))+" / "+std::to_string(stats.active_limit/(1024*1024))+" MiB, "+
+        std::to_string(stats.entries)+" 条"+(stats.clearing ? "，清理中" : "")+(stats.warning.empty() ? "" : "，"+stats.warning);
+    cache_status_->SetLabel(WxUtf8(label));
 }
 
 void CorpusRunPanel::SetSession(CorpusSession session) {
@@ -379,6 +438,7 @@ void CorpusRunPanel::OnPlaybackSettingsChanged(wxCommandEvent& event) {
 }
 
 void CorpusRunPanel::OnPlaybackTimer(wxTimerEvent&) {
+    UpdateCacheUi();
     if (!playback_) return;
     const auto state = playback_->State();
     if (state == PlaybackState::Idle || state == PlaybackState::Error) {

@@ -5,6 +5,8 @@
 #include "services/CorpusViewService.h"
 #include "services/ModelRegistry.h"
 #include "services/WorkbookService.h"
+#include "platform/FileIo.h"
+#include <chrono>
 
 #include "TestCheck.h"
 
@@ -153,7 +155,7 @@ void TestJsonConfigStoreRoundTrip() {
 
     REQUIRE(loaded.last_workbook == config.last_workbook);
     REQUIRE(loaded.last_sheet == config.last_sheet);
-    REQUIRE(loaded.schema_version == 3);
+    REQUIRE(loaded.schema_version == 4);
     REQUIRE(loaded.speech_rate == config.speech_rate);
     REQUIRE(loaded.sheet_header_rows.size() == 1);
     REQUIRE(loaded.sheet_header_rows[0].header_row == 2);
@@ -262,7 +264,7 @@ void TestJsonConfigV1LanguageMigrationDoesNotOverrideAnalyzer() {
 
     JsonConfigStore store(path);
     const auto loaded = store.Load();
-    REQUIRE(loaded.schema_version == 3);
+    REQUIRE(loaded.schema_version == 4);
     REQUIRE(!loaded.sheet_mappings[0].columns[0].language_user_overridden);
     REQUIRE(loaded.sheet_mappings[0].columns[0].language_selection_mode == LanguageSelectionMode::Auto);
 
@@ -297,7 +299,7 @@ void TestJsonConfigV3FixedLanguageSurvivesWhenEqualToGuess() {
     JsonConfigStore store(path);
     store.Save(config);
     const auto loaded = store.Load();
-    REQUIRE(loaded.schema_version == 3);
+    REQUIRE(loaded.schema_version == 4);
     REQUIRE(loaded.sheet_mappings[0].columns[0].language_code == columns[0].guessed_language);
     REQUIRE(loaded.sheet_mappings[0].columns[0].language_user_overridden);
     REQUIRE(loaded.sheet_mappings[0].columns[0].language_selection_mode == LanguageSelectionMode::Fixed);
@@ -546,6 +548,21 @@ int main() {
         TestJsonConfigFutureSchemaRefusesOverwrite();
         TestJsonConfigV1LanguageMigrationDoesNotOverrideAnalyzer();
         TestJsonConfigV3FixedLanguageSurvivesWhenEqualToGuess();
+        {
+            const auto root=std::filesystem::temp_directory_path()/("adayo-schema4-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+            std::filesystem::create_directory(root);
+            const std::string old=R"({"schema_version":3,"speech_rate":1.4,"alignment_threshold":83,"pass_threshold":99})";
+            WriteBinaryFile(root/"config.json",old.data(),old.size());
+            JsonConfigStore store(root/"config.json"); auto migrated=store.Load();
+            REQUIRE(migrated.schema_version==4); REQUIRE(migrated.speech_rate==1.4); REQUIRE(migrated.alignment_threshold==83); REQUIRE(migrated.pass_threshold==99);
+            REQUIRE(migrated.audio_cache.enabled); REQUIRE(migrated.audio_cache.disk_limit_bytes==2147483648ull);
+            store.Save(migrated); REQUIRE(store.Load().speech_rate==1.4);
+            const std::string bad=R"({"schema_version":4,"audio_cache":{"disk_limit_bytes":0}})";
+            WriteBinaryFile(root/"config.json",bad.data(),bad.size());
+            const auto before=FileSha256(root/"config.json"); const auto rejected=store.LoadOrDefault();
+            REQUIRE(rejected.status==ConfigLoadStatus::InvalidValues); REQUIRE(!rejected.allow_save);
+            REQUIRE(FileSha256(root/"config.json")==before);
+        }
         TestWorkbookMappingIdentityIncludesHeaderRow();
         TestWorkbookIdentityIgnoresContentVersion();
         TestSavedLanguageOverrideSemantics();

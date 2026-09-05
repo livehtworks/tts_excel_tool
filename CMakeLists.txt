@@ -61,9 +61,13 @@ add_library(adayo_core STATIC
     src/services/FileLogger.cpp
     src/services/PlaybackService.cpp
     src/services/TtsService.cpp
+    src/services/AudioCache.cpp
     src/services/WorkbookService.cpp
 )
 target_include_directories(adayo_core PUBLIC src)
+if(WIN32)
+    target_link_libraries(adayo_core PUBLIC bcrypt)
+endif()
 
 add_library(adayo_moss_adapter STATIC src/adapters/tts/MossNanoTtsEngine.cpp)
 target_include_directories(adayo_moss_adapter PUBLIC src)
@@ -126,6 +130,8 @@ endif()
 
 if(ADAYO_WITH_JSON_CONFIG)
     find_package(nlohmann_json CONFIG REQUIRED)
+    target_link_libraries(adayo_core PUBLIC nlohmann_json::nlohmann_json)
+    target_compile_definitions(adayo_core PUBLIC ADAYO_HAS_JSON_CONFIG=1)
     add_library(adayo_persistence STATIC
         src/persistence/JsonConfigStore.cpp
         src/services/ModelRegistry.cpp

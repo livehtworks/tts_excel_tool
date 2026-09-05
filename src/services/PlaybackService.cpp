@@ -123,7 +123,6 @@ bool PlaybackService::WaitInterval(std::chrono::milliseconds interval, const std
 void PlaybackService::RunSequence(PlaybackRequest request, const std::shared_ptr<AudioPlaybackContext>& context) {
     try {
         if (!WaitReady(context)) { Finish(context); return; }
-        tts_.EnsureModelLoaded(request.model_id, request.model_config);
         for (std::size_t i = 0; i < request.items.size(); ++i) {
             if (!WaitReady(context) || !SetRequestState(context, PlaybackState::Generating)) break;
             const auto& item = request.items[i];
@@ -133,9 +132,9 @@ void PlaybackService::RunSequence(PlaybackRequest request, const std::shared_ptr
                 current_row_ = item.row_index; current_column_ = item.column_index;
             }
             if (!item.request.text.empty()) {
-                auto audio = tts_.Synthesize(item.request);
+                auto prepared = tts_.Prepare(request.model_id, request.model_config, item.request, context->cancellation.get_token());
                 if (!WaitReady(context) || !SetRequestState(context, PlaybackState::Playing)) break;
-                player_.Play(audio, context);
+                player_.Play(*prepared.audio, context);
             }
             if (i + 1 < request.items.size() && !WaitInterval(request.interval, context)) break;
         }

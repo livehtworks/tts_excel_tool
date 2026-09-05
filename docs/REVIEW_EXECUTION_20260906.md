@@ -6,7 +6,8 @@ Baseline: `9e93d1b`. Scope: the 17 issue contracts in the external September 6 w
 
 - A: create-only package protection, literal copy/hash regression and failed-tool rejection passed. Current CMake parses schema 5. CMake 3.24 execution remains to be checked.
 - B: request-owned cancellation and context-aware device handoff implemented. Core and Release P5 passed, including deterministic queued-stale, repeated Stop and handoff controls. Actual audio output and human listening remain separate acceptance gates.
-- C-G: pending.
+- C: bounded memory/disk audio cache, model/config/asset identity, schema 4, management UI and epoch clear are wired through the real TtsService/PlaybackService. Core P5 and Release P2/P5 passed. Real EN/ZH voices each passed 20 baseline, memory and separate-process disk requests; hits performed zero additional engine loads/syntheses and memory/disk PCM hashes matched. Device/loopback timing, filesystem fault coverage and final performance aggregation remain final-acceptance work.
+- D-G: pending.
 
 ## Local Evidence
 

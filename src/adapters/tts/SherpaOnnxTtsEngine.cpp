@@ -3,6 +3,7 @@
 #include "platform/UnicodePath.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <memory>
@@ -34,6 +35,15 @@ struct SherpaOnnxTtsEngine::Impl {
 
 SherpaOnnxTtsEngine::SherpaOnnxTtsEngine() : impl_(std::make_unique<Impl>()) {}
 SherpaOnnxTtsEngine::~SherpaOnnxTtsEngine() { Unload(); }
+
+std::string SherpaOnnxTtsEngine::RuntimeIdentity() const {
+#ifdef ADAYO_HAS_SHERPA_ONNX
+    return std::string("sherpa-vits-v1|") + SherpaOnnxGetVersionStr() + "|" + SherpaOnnxGetOnnxruntimeVersionStr() +
+        "|cpu|noise=.667,.8|length=1|silence=.2|max_sentences=2|float32-v1";
+#else
+    throw std::runtime_error("Sherpa runtime unavailable");
+#endif
+}
 
 bool SherpaOnnxTtsEngine::IsLoaded() const noexcept {
 #ifdef ADAYO_HAS_SHERPA_ONNX
@@ -88,6 +98,8 @@ void SherpaOnnxTtsEngine::Unload() noexcept {
 }
 
 AudioBuffer SherpaOnnxTtsEngine::Synthesize(const TtsRequest& request) {
+    if (!std::isfinite(request.speed) || request.text.find('\0') != std::string::npos)
+        throw std::invalid_argument("Invalid speed or embedded NUL in TTS request");
 #ifdef ADAYO_HAS_SHERPA_ONNX
     if (!impl_->tts) throw std::runtime_error("sherpa-onnx TTS 未加载");
     SherpaOnnxGenerationConfig generation{};

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/domain/Types.h"
+#include "services/AudioCache.h"
 
 #include <cstddef>
 #include <string>
@@ -21,7 +22,8 @@ struct SheetMappingConfig {
 };
 
 struct AppConfig {
-    int schema_version{3};
+    int schema_version{4};
+    AudioCacheOptions audio_cache;
     std::string last_workbook;
     std::string last_sheet;
     double speech_rate{1.0};

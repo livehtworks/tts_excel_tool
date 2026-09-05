@@ -35,6 +35,8 @@ ApplicationRuntime::ApplicationRuntime(std::filesystem::path exe_dir)
         logger_.Warn("config", config_load_message_);
     }
     tts_service_.SetEngine(std::make_unique<SherpaOnnxTtsEngine>());
+    tts_service_.InitializeCache(exe_dir / "cache" / "tts-v1", config_.audio_cache);
+    if (!tts_service_.Cache()->Stats().warning.empty()) logger_.Warn("cache", tts_service_.Cache()->Stats().warning);
     model_scan_ = model_registry_.ScanSherpaModelsWithDiagnostics();
     logger_.Info("model", "valid models=" + std::to_string(model_scan_.entries.size()) +
         ", invalid models=" + std::to_string(model_scan_.invalid.size()));

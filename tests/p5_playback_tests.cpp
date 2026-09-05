@@ -1,6 +1,10 @@
 #include "adapters/audio/IAudioPlayer.h"
 #include "core/tts/ITtsEngine.h"
 #include "services/PlaybackService.h"
+#include "platform/FileIo.h"
+#include "platform/UnicodePath.h"
+#include <filesystem>
+#include <limits>
 
 #include "TestCheck.h"
 
@@ -336,6 +340,113 @@ void TestRepeatedStopDuringSynthesis() {
     }
 }
 
+std::filesystem::path NewCacheTestRoot() {
+    auto root=std::filesystem::temp_directory_path()/("adayo-cache-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    REQUIRE(std::filesystem::create_directory(root));
+    return root;
+}
+TtsModelConfig CacheTestConfig(const std::filesystem::path& root) {
+    WriteBinaryFile(root/"model.onnx","model",5);
+    WriteBinaryFile(root/"tokens.txt","tokens",6);
+    TtsModelConfig config;
+    config.engine_id="fake"; config.language_code="en-US";
+    config.model_path=PathToUtf8(root/"model.onnx"); config.tokens_path=PathToUtf8(root/"tokens.txt");
+    return config;
+}
+void TestCacheServiceIdentityAndRestart() {
+    REQUIRE(Sha256("abc")=="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    const auto root=NewCacheTestRoot();
+    auto config=CacheTestConfig(root);
+    std::string key;
+    std::vector<float> samples;
+    {
+        TtsService tts; tts.SetEngine(std::make_unique<FakeTtsEngine>()); tts.InitializeCache(root/"tts-v1",{});
+        const TtsRequest request{"hello", "en-US",0,1.0};
+        auto cold=tts.Prepare("voice",config,request); key=cold.timings.key; samples=cold.audio->samples;
+        REQUIRE(cold.timings.source=="synth"); REQUIRE(cold.timings.synth_call_delta==1); REQUIRE(cold.timings.load_call_delta==1);
+        auto warm=tts.Prepare("voice",config,request);
+        REQUIRE(warm.timings.source=="memory"); REQUIRE(warm.timings.synth_call_delta==0); REQUIRE(warm.timings.load_call_delta==0);
+        REQUIRE(warm.audio->samples==samples);
+        for (auto variant : {TtsRequest{"hello!","en-US",0,1.0},TtsRequest{"hello","en-US",1,1.0},TtsRequest{"hello","en-US",0,1.1}})
+            REQUIRE(tts.Prepare("voice",config,variant).timings.key!=key);
+        const auto low=tts.Prepare("voice",config,{"slow","en-US",0,0.49});
+        REQUIRE(low.timings.key==tts.Prepare("voice",config,{"slow","en-US",0,0.5}).timings.key);
+        for(double invalid:{std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity()}) {
+            bool rejected=false; try{tts.Prepare("voice",config,{"hello","en-US",0,invalid});}catch(const std::invalid_argument&){rejected=true;} REQUIRE(rejected);
+        }
+        bool mismatch=false; try { tts.Prepare("voice",config,{"hello","zh-CN",0,1}); } catch(const std::runtime_error&){mismatch=true;} REQUIRE(mismatch);
+#ifdef ADAYO_HAS_JSON_CONFIG
+        AudioCache second(root/"tts-v1",{}); REQUIRE(!second.Stats().disk_enabled); REQUIRE(!second.Stats().warning.empty());
+#endif
+    }
+#ifdef ADAYO_HAS_JSON_CONFIG
+    {
+        TtsService restarted; restarted.SetEngine(std::make_unique<FakeTtsEngine>()); restarted.InitializeCache(root/"tts-v1",{});
+        auto hit=restarted.Prepare("voice",config,{"hello","en-US",0,1});
+        std::cout << "restart source=" << hit.timings.source << " warning=" << restarted.Cache()->Stats().warning << " root=" << PathToUtf8(root) << '\n';
+        REQUIRE(hit.timings.source=="disk"); REQUIRE(hit.timings.load_call_delta==0); REQUIRE(hit.timings.synth_call_delta==0); REQUIRE(hit.audio->samples==samples);
+    }
+    WriteBinaryFile(root/"tts-v1"/(key+".wav"),"bad",3);
+    {
+        TtsService rebuilt; rebuilt.SetEngine(std::make_unique<FakeTtsEngine>()); rebuilt.InitializeCache(root/"tts-v1",{});
+        REQUIRE(rebuilt.Prepare("voice",config,{"hello","en-US",0,1}).timings.source=="synth");
+        WriteBinaryFile(root/"model.onnx","new model content",17);
+        auto changed=rebuilt.Prepare("voice",config,{"hello","en-US",0,1});
+        REQUIRE(changed.timings.key!=key); REQUIRE(changed.timings.load_call_delta==1);
+        config.num_threads=3;
+        REQUIRE(rebuilt.Prepare("voice",config,{"hello","en-US",0,1}).timings.load_call_delta==1);
+        std::filesystem::remove(root/"model.onnx");
+        bool missing=false; try{rebuilt.Prepare("voice",config,{"hello","en-US",0,1});}catch(const std::runtime_error&){missing=true;} REQUIRE(missing);
+    }
+#endif
+}
+void TestCacheEpochAndCancelableConcurrentMiss() {
+    const auto root=NewCacheTestRoot(); auto config=CacheTestConfig(root);
+    auto* engine=new FakeTtsEngine(); engine->block_synthesis=true;
+    TtsService tts; tts.SetEngine(std::unique_ptr<ITtsEngine>(engine)); tts.InitializeCache(root/"tts-v1",{});
+    PreparedAudio first,second; std::exception_ptr failure;
+    std::jthread producer([&]{try{first=tts.Prepare("voice",config,{"hello","en-US",0,1});}catch(...){failure=std::current_exception();}});
+    REQUIRE(engine->WaitForSynthStart(std::chrono::seconds{2}));
+    std::stop_source cancel; cancel.request_stop(); bool rejected=false;
+    try{tts.Prepare("voice",config,{"hello","en-US",0,1},cancel.get_token());}catch(const std::runtime_error&){rejected=true;} REQUIRE(rejected);
+    tts.Cache()->BeginClear(); tts.Cache()->FinishClear(); engine->ReleaseSynthesis(); producer.join();
+    if(failure) std::rethrow_exception(failure);
+    REQUIRE(first.audio); REQUIRE(tts.Cache()->Stats().entries==0);
+    std::jthread one([&]{first=tts.Prepare("voice",config,{"same","en-US",0,1});});
+    std::jthread two([&]{second=tts.Prepare("voice",config,{"same","en-US",0,1});});
+    one.join(); two.join();
+    REQUIRE(first.timings.synth_call_delta+second.timings.synth_call_delta==1);
+    REQUIRE(first.audio->samples==second.audio->samples);
+    tts.Cache()->BeginClear(); const auto cleared=tts.Cache()->FinishClear(); REQUIRE(cleared.entries==0); REQUIRE(cleared.failed_entries==0);
+    REQUIRE(!first.audio->samples.empty());
+}
+
+void TestCacheCapacityAndLru() {
+    const auto root=NewCacheTestRoot();
+    AudioCacheOptions options; options.entry_limit=2; options.memory_limit_bytes=640;
+    AudioCache cache(root/"tts-v1",options);
+    auto audio=std::make_shared<AudioBuffer>(); audio->sample_rate=16000; audio->channels=1; audio->samples.assign(160,0.1f);
+    const auto a=Sha256("a"),b=Sha256("b"),c=Sha256("c");
+    cache.Put(a,"voice",audio,0); cache.Put(b,"voice",audio,0);
+    auto held=cache.Get(b,"voice",0); REQUIRE(held.audio);
+    cache.Put(c,"voice",audio,0);
+    REQUIRE(cache.Stats().entries==2); REQUIRE(cache.Stats().skipped>0);
+    held.audio.reset(); audio.reset();
+    auto fresh=std::make_shared<AudioBuffer>(); fresh->sample_rate=16000; fresh->samples.assign(160,0.2f);
+    cache.Put(c,"voice",fresh,0); REQUIRE(cache.Stats().entries==2); REQUIRE(cache.Stats().evicted>=1);
+    REQUIRE(cache.Stats().memory_bytes<=640); REQUIRE(cache.Stats().used_bytes<=options.disk_limit_bytes);
+    auto held2=cache.Get(c,"voice",0); REQUIRE(held2.audio);
+#ifdef ADAYO_HAS_JSON_CONFIG
+    auto small=options; small.disk_limit_bytes=32;
+    const auto oldLimit=cache.Stats().active_limit;
+    bool rejected=false; try{cache.Configure(small);}catch(const std::runtime_error&){rejected=true;}
+    REQUIRE(rejected); REQUIRE(cache.Stats().active_limit==oldLimit);
+#endif
+    auto disabled=options; disabled.enabled=false; cache.Configure(disabled);
+    const auto entries=cache.Stats().entries;
+    REQUIRE(!cache.Get(c,"voice",0).audio); cache.Put(a,"voice",fresh,0); REQUIRE(cache.Stats().entries==entries);
+}
+
 class HandoffPlayer final : public IAudioPlayer {
 public:
     void Play(const AudioBuffer&) override { throw std::logic_error("Context required"); }
@@ -482,6 +593,9 @@ int main() {
         TestStalePlaybackRequestDoesNotLoadOldModel();
         TestRepeatedStopDuringSynthesis();
         TestControlsAtDeviceHandoff();
+        TestCacheServiceIdentityAndRestart();
+        TestCacheEpochAndCancelableConcurrentMiss();
+        TestCacheCapacityAndLru();
         TestWorkerQueueDiscardPending();
         TestWorkerQueueStopIsIdempotentAndConstructionIsStable();
         TestWorkerQueueUnhandledTaskErrorDoesNotTerminateWorker();
