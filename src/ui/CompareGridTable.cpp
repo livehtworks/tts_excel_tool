@@ -78,7 +78,7 @@ wxString CompareGridTable::GetColLabelValue(int col) {
     const auto prefix = (*reports_)[group_index].label;
     const auto suffix = col%4==2?CompareService::ValueLabel((*reports_)[group_index].options.metric):std::string(ColumnSuffix(col%4));
     if (prefix.empty()) return WxUtf8(suffix);
-    return WxUtf8(prefix + " " + suffix);
+    return WxUtf8(prefix + "\n" + suffix);
 }
 
 void CompareGridTable::SetReports(std::shared_ptr<const std::vector<CompareReportGroup>> reports) {

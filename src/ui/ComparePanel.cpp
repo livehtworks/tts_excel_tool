@@ -475,8 +475,9 @@ void ComparePanel::RefreshGrid() {
         wxGridTableMessage msg(result_table_, wxGRIDTABLE_NOTIFY_COLS_APPENDED, new_cols - old_cols);
         result_grid_->ProcessTableMessage(msg);
     }
+    result_grid_->SetColLabelSize(2 * result_grid_->GetCharHeight() + 12);
     for (int c = 0; c < result_grid_->GetNumberCols(); ++c) {
-        result_grid_->SetColSize(c, (c % 4 == 2 || c % 4 == 3) ? 90 : 260);
+        result_grid_->SetColSize(c, c % 4 == 2 ? 180 : (c % 4 == 3 ? 140 : 260));
     }
     result_grid_->ForceRefresh();
     result_grid_->Thaw();
