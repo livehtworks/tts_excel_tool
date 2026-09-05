@@ -132,6 +132,7 @@ ComparePanel::ComparePanel(wxWindow* parent, ApplicationRuntime& runtime)
     });
     export_button_=new wxButton(this,wxID_ANY,WxUtf8("导出 Excel"));
     status_=new wxStaticText(this,wxID_ANY,WxUtf8("就绪"),wxDefaultPosition,wxDefaultSize,wxST_ELLIPSIZE_END);
+    status_->SetMinSize(wxSize(0,-1));
     compare_button_->Bind(wxEVT_BUTTON,&ComparePanel::OnCompare,this);
     export_button_->Bind(wxEVT_BUTTON,&ComparePanel::OnExport,this);
     for(auto* button:{compare_button_,cancel_button_,export_button_}) commands->Add(button,0,wxRIGHT,8);
@@ -140,6 +141,7 @@ ComparePanel::ComparePanel(wxWindow* parent, ApplicationRuntime& runtime)
     ApplyOptions(runtime_.ConfigSnapshot().compare);
 
     result_grid_ = new wxGrid(this, wxID_ANY);
+    result_grid_->SetDefaultCellOverflow(false);
     result_table_ = new CompareGridTable(report_groups_);
     result_grid_->SetTable(result_table_, true, wxGrid::wxGridSelectCells);
     result_grid_->EnableEditing(false);

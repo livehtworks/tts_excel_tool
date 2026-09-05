@@ -125,6 +125,7 @@ CorpusMappingPanel::CorpusMappingPanel(wxWindow* parent, ApplicationRuntime& run
     root->Add(show_hidden_,0,wxLEFT|wxRIGHT|wxBOTTOM,6);
 
     column_grid_ = new wxGrid(this, wxID_ANY);
+    column_grid_->SetDefaultCellOverflow(false);
     column_grid_->CreateGrid(0, 10);
     const char* headers[] = {"启用", "Excel列", "表头", "类型", "非空", "样本", "用途", "语言", "模型/Voice", "模型状态"};
     for (int i = 0; i < 10; ++i) {
