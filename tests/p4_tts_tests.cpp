@@ -256,6 +256,7 @@ void VerifyLoopback(const AudioBuffer& audio,const std::vector<float>& captured,
 int main(int argc, char** argv) {
     if(argc==6 && (std::string(argv[1])=="--cache-probe" || std::string(argv[1])=="--audio-probe")) {
         return test::RunTestMain("adayo_p4_real_cache_probe",[&] {
+            const auto probe_started=std::chrono::steady_clock::now();
             const auto root=PathFromUtf8(argv[2]);
             const auto mode=std::string(argv[3]), language=std::string(argv[4]);
             const bool loopback=std::string(argv[1])=="--audio-probe";
@@ -282,6 +283,8 @@ int main(int argc, char** argv) {
                 const auto item_begin=std::chrono::steady_clock::now();
                 auto result=service.Prepare(model.id,model.config,request);
                 RequireUsableAudio(*result.audio);
+                if(index==0) std::cout<<"FIRST_READY total_from_probe_entry_ms="
+                    <<std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-probe_started).count()<<"\n";
                 if(mode=="memory" || mode=="disk") {
                     REQUIRE(result.timings.source==mode); REQUIRE(result.timings.load_call_delta==0); REQUIRE(result.timings.synth_call_delta==0);
                 } else { REQUIRE(result.timings.source=="synth"); REQUIRE(result.timings.load_call_delta==0); }
