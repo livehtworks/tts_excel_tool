@@ -189,7 +189,7 @@ function Test-DependencyClosure([string]$PackageDir, [string]$VcRuntimeDirectory
     $dumpbin = Find-Dumpbin
     $systemDlls = @(
         "advapi32.dll","bcrypt.dll","cfgmgr32.dll","comctl32.dll","comdlg32.dll","crypt32.dll","dwmapi.dll",
-        "gdi32.dll","gdiplus.dll","imm32.dll","kernel32.dll","msimg32.dll","msvcrt.dll","ole32.dll",
+        "gdi32.dll","gdiplus.dll","imm32.dll","kernel32.dll","msimg32.dll","msvcrt.dll","ole32.dll","dbghelp.dll","dxgi.dll",
         "oleacc.dll","oleaut32.dll","rpcrt4.dll","sechost.dll","setupapi.dll","shell32.dll","shcore.dll",
         "shlwapi.dll","ucrtbase.dll","user32.dll","uxtheme.dll","version.dll","wininet.dll","winmm.dll",
         "winspool.drv","ws2_32.dll","wsock32.dll"
@@ -211,7 +211,12 @@ function Test-DependencyClosure([string]$PackageDir, [string]$VcRuntimeDirectory
         if ($seen.ContainsKey($key)) { continue }
         $seen[$key] = $true
         foreach ($dep in Get-Dependents $dumpbin $binary) {
-            if ($allow.ContainsKey($dep)) { continue }
+            if ($allow.ContainsKey($dep)) {
+                if (-not (Test-Path -LiteralPath (Join-Path ([Environment]::SystemDirectory) $dep) -PathType Leaf)) {
+                    throw "Required Windows system DLL not found: $dep"
+                }
+                continue
+            }
             if (Test-SystemApiSet $dep) { continue }
             if (-not $known.ContainsKey($dep) -and $VcRuntimeDirectory) {
                 $runtimeDependency=Join-Path $VcRuntimeDirectory $dep
