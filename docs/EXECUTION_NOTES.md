@@ -91,3 +91,11 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 - Packaging does not create a ZIP unless `-Zip` is passed; the user packages ZIPs manually during development.
 - The canonical model source remains `dist/AdayoCorpusTool/model`. Isolated review packages copy only manifest-listed models with source/destination hash verification; the script does not download or change the source models.
 - UCRT `api-ms-win-*` imports can be loader contracts without physical sibling DLLs. Packaging resolves only API-set names through the System32-only Windows loader and verifies the resulting module path; an arbitrary or nonexistent name is never accepted by prefix alone.
+
+## wxWidgets And Acceptance Timing
+
+- A shrinking status label needs both a zero minimum width and `wxST_NO_AUTORESIZE | wxST_ELLIPSIZE_END`. `SetLabel` otherwise expands the native control over adjacent buttons even when the sizer has a bounded width.
+- Comparison grid labels use separate group/metric lines and a metric-width column so metric units remain readable. Grid cell overflow is disabled in mapping/runtime/compare views.
+- Track playback state transitions when restoring idle text; continuously overwriting idle status would hide export/error messages, while never updating idle leaves stale Stopping text.
+- Probe first-ready timing starts before model scan and cache initialization. It excludes OS process creation/DLL loader time. WASAPI probe callback timing also includes recording setup and its pre-roll; do not report it as GUI click-to-audible latency.
+- Save complete pre-task inventories when whole-tree preservation is an acceptance assertion. Post-task hashes cannot reconstruct a missing pre-task baseline.

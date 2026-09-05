@@ -1,6 +1,6 @@
 # Project Status
 
-Current phase: September 6 review implementation A-F committed; G implementation and final acceptance in progress. The audit baseline is `9e93d1b`. Acceptance evidence is tracked in `docs/REVIEW_EXECUTION_20260906.md`; older R0-R8 logs are historical, not the current acceptance authority.
+Current phase: September 6 implementation stages A-G and discovered packaging/UI corrections are committed. All 17 scoped code issues are addressed. Final Release 7/7 and Core 4/4 regressions passed. Local acceptance is 29 PASS / 7 NOT_RUN, not an overall acceptance PASS; remaining interactive/human gates and the original baseline evidence limitation are listed below. The audit baseline is `9e93d1b`. Evidence is indexed in `docs/REVIEW_EXECUTION_20260906.md`; older R0-R8 logs are historical, not current acceptance authority.
 
 ## Architecture And Ownership
 
@@ -25,9 +25,12 @@ Current phase: September 6 review implementation A-F committed; G implementation
 - Source commits exclude build/dist/models payloads, private workbooks, recordings, local configs/logs and the archived old project.
 - Old project remains read-only under `backup/old_project_20260818_160848`. Earlier status history is archived in `docs/history/PROJECT_STATUS_PRE_SEPTEMBER_ACCEPTANCE.md`.
 
-## Remaining Acceptance
+## Verification And Remaining Acceptance
 
-- Complete final Release/Core regression and real voice stress.
-- Complete isolated review-program GUI and loopback scenarios and evidence aggregation.
-- Human listening and target-user business acceptance remain separate gates; do not infer them from automated tests.
-- Final staged commit/push is explicitly authorized by the current user request.
+- Full Release 7/7 passed, including 500 EN + 500 ZH real generations, model switching and Unicode model paths; Core 4/4 passed with explicit reduced Unicode capability.
+- Each available language passed 20 baseline, 20 memory and 20 separate-process disk requests. Hits made zero engine calls and retained identical PCM. Another 120 real WASAPI loopback recordings passed head/tail correlation.
+- Actual isolated EXE ran from an external working directory: original workbook, mapping, playback/cache, manual result, compare and both exports. Native and OOXML readback passed. Status overlap, stale idle status and clipped metric headers discovered during GUI acceptance were fixed and rechecked.
+- Pending user verification: human listening; the full cold/warm playback/control/close and live clear matrix; rapid file/sheet/header changes; multi-language edit/range/cursor combinations; close/cancel/reopen during background work. Automated portions of these composite cases are documented separately, not promoted to full PASS.
+- Arabic/Spanish native voice gates are BLOCKED by missing complete native resources. Actual ASR business accuracy is NOT_RUN because recognizer output was not supplied. No extra voice download or model substitution was performed.
+- Evidence limitation: original workbook preflight hash and isolated review/model/junction protections passed, but no full pre-task hash inventory of all established production/backup files was recorded. This cannot be reconstructed retrospectively.
+- Final user-authorized publication is ordinary source commit/push to origin/main; no release ZIP or existing runtime replacement.
