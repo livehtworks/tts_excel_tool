@@ -4,9 +4,10 @@
 #include <string_view>
 
 namespace adayo {
+enum class UnicodeNormalization { None, Nfc, Nfkc };
 
 struct NormalizerOptions {
-    bool unicode_nfkc{true};
+    UnicodeNormalization normalization{UnicodeNormalization::Nfkc};
     bool case_fold{true};
     bool collapse_whitespace{true};
     bool trim{true};

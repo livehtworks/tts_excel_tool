@@ -2,6 +2,7 @@
 
 #include "core/unicode/Utf8.h"
 #include "platform/UnicodePath.h"
+#include "core/compare/CompareExecutionContext.h"
 
 #include <fstream>
 #include <stdexcept>
@@ -137,30 +138,23 @@ std::string DecodeGb18030(std::string_view bytes) {
 }
 
 std::string DecodeText(std::string_view content, TextEncoding encoding) {
+    TextEncoding bom=TextEncoding::Auto;
+    std::size_t prefix=0;
+    if(content.starts_with("\xEF\xBB\xBF")) {bom=TextEncoding::Utf8;prefix=3;}
+    else if(content.starts_with("\xFF\xFE")) {bom=TextEncoding::Utf16LE;prefix=2;}
+    else if(content.starts_with("\xFE\xFF")) {bom=TextEncoding::Utf16BE;prefix=2;}
+    if(prefix) {
+        if(encoding!=TextEncoding::Auto && encoding!=bom) throw std::runtime_error("Explicit text encoding conflicts with BOM");
+        encoding=bom; content.remove_prefix(prefix);
+    }
     if (encoding == TextEncoding::Utf8) {
-        if (!IsStrictUtf8(content)) throw std::runtime_error("文本不是合法 UTF-8");
+        (void)unicode::DecodeStrict(content);
         return std::string(content);
     }
     if (encoding == TextEncoding::Utf16LE) return DecodeUtf16(content, true);
     if (encoding == TextEncoding::Utf16BE) return DecodeUtf16(content, false);
     if (encoding == TextEncoding::Gb18030) return DecodeGb18030(content);
 
-    if (content.size() >= 3 &&
-        static_cast<unsigned char>(content[0]) == 0xEF &&
-        static_cast<unsigned char>(content[1]) == 0xBB &&
-        static_cast<unsigned char>(content[2]) == 0xBF) {
-        return std::string(content.substr(3));
-    }
-    if (content.size() >= 2 &&
-        static_cast<unsigned char>(content[0]) == 0xFF &&
-        static_cast<unsigned char>(content[1]) == 0xFE) {
-        return DecodeUtf16(content.substr(2), true);
-    }
-    if (content.size() >= 2 &&
-        static_cast<unsigned char>(content[0]) == 0xFE &&
-        static_cast<unsigned char>(content[1]) == 0xFF) {
-        return DecodeUtf16(content.substr(2), false);
-    }
     if (IsStrictUtf8(content)) return std::string(content);
     return DecodeGb18030(content);
 }
@@ -176,8 +170,9 @@ void TrimLineBoundary(std::string& text) {
     if (begin > 0) text.erase(0, begin);
 }
 
-void AddRecord(std::vector<std::string>& records, std::string record, bool skip_empty) {
-    TrimLineBoundary(record);
+void AddRecord(std::vector<std::string>& records, std::string record, bool skip_empty, bool legacy) {
+    if(legacy) TrimLineBoundary(record);
+    if(unicode::DecodeStrict(record).size()>CompareExecutionContext::record_codepoints) throw std::runtime_error("Text record exceeds 65536 codepoints");
     if (skip_empty && unicode::Trim(unicode::Decode(record)).empty()) return;
     records.push_back(std::move(record));
 }
@@ -188,20 +183,29 @@ std::vector<std::string> TextFileImporter::ReadUtf8Records(const std::filesystem
     if (!input) {
         throw std::runtime_error("无法读取文本文件: " + PathToUtf8(path));
     }
-    std::string content((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    const auto bytes=std::filesystem::file_size(path);
+    if(bytes>CompareExecutionContext::file_bytes) throw std::runtime_error("Text file exceeds 64MiB input budget");
+    std::string content(static_cast<std::size_t>(bytes),'\0');
+    input.read(content.data(),static_cast<std::streamsize>(content.size()));
+    if(!input || input.peek()!=std::char_traits<char>::eof()) throw std::runtime_error("Text input changed or could not be read completely");
     return SplitUtf8Records(content, options);
 }
 
 std::vector<std::string> TextFileImporter::SplitUtf8Records(std::string_view content, const TextImportOptions& options) {
+    if(content.size()>CompareExecutionContext::file_bytes) throw std::runtime_error("Text input exceeds 64MiB input budget");
     const std::string text = DecodeText(content, options.encoding);
+    (void)unicode::DecodeStrict(text);
+    (void)unicode::DecodeStrict(options.delimiter);
+    const bool legacy=options.empty_records==EmptyRecordPolicy::Legacy;
+    const bool skip=legacy && options.skip_empty;
     std::vector<std::string> records;
     if (options.delimiter.empty()) {
         std::size_t begin = 0;
-        while (begin <= text.size()) {
+        while (begin < text.size()) {
             const auto end = text.find('\n', begin);
-            AddRecord(records,
-                end == std::string::npos ? text.substr(begin) : text.substr(begin, end - begin),
-                options.skip_empty);
+            auto record=end == std::string::npos ? text.substr(begin) : text.substr(begin, end - begin);
+            if(end!=std::string::npos && !record.empty() && record.back()=='\r') record.pop_back();
+            AddRecord(records,std::move(record),skip,legacy);
             if (end == std::string::npos) break;
             begin = end + 1;
         }
@@ -209,11 +213,11 @@ std::vector<std::string> TextFileImporter::SplitUtf8Records(std::string_view con
     }
 
     std::size_t begin = 0;
-    while (begin <= text.size()) {
+    while (begin < text.size()) {
         const auto end = text.find(options.delimiter, begin);
         AddRecord(records,
             end == std::string::npos ? text.substr(begin) : text.substr(begin, end - begin),
-            options.skip_empty);
+            skip,legacy);
         if (end == std::string::npos) break;
         begin = end + options.delimiter.size();
     }

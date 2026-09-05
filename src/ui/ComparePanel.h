@@ -68,6 +68,8 @@ private:
     wxButton* reference_browse_{};
     wxButton* actual_browse_{};
     wxButton* compare_button_{};
+    wxButton* cancel_button_{};
+    std::stop_source comparison_cancel_;
     wxButton* export_button_{};
     wxStaticText* status_{};
     wxListBox* group_list_{};

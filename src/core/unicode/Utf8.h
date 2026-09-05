@@ -6,6 +6,7 @@
 namespace adayo::unicode {
 
 std::u32string Decode(std::string_view utf8);
+std::u32string DecodeStrict(std::string_view utf8);
 std::string Encode(std::u32string_view text);
 bool IsWhitespace(char32_t cp);
 bool IsPunctuation(char32_t cp);

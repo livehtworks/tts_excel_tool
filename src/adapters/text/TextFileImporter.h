@@ -14,11 +14,13 @@ enum class TextEncoding {
     Utf16BE,
     Gb18030,
 };
+enum class EmptyRecordPolicy { Legacy, PreserveInternal };
 
 struct TextImportOptions {
     std::string delimiter;
     bool skip_empty{true};
     TextEncoding encoding{TextEncoding::Auto};
+    EmptyRecordPolicy empty_records{EmptyRecordPolicy::Legacy};
 };
 
 class TextFileImporter {

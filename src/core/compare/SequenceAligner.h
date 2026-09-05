@@ -24,7 +24,7 @@ public:
     std::vector<AlignmentPair> Align(
         const std::vector<TextRecord>& reference,
         const std::vector<TextRecord>& actual,
-        const SequenceAlignmentOptions& options = {}) const;
+        const SequenceAlignmentOptions& options = {}, CompareExecutionContext* context = nullptr) const;
 
 private:
     TextSimilarity similarity_;

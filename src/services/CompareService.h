@@ -21,7 +21,7 @@ public:
     std::vector<CompareRow> Compare(
         const std::vector<std::string>& reference,
         const std::vector<std::string>& actual,
-        const CompareOptions& options = {}) const;
+        const CompareOptions& options = {}, CompareExecutionContext* context = nullptr) const;
 };
 
 } // namespace adayo

@@ -40,6 +40,8 @@ static void TestDiff() {
 static void TestSequenceAlignmentMissing() {
     CompareService service;
     CompareOptions options;
+    options.normalizer.normalization=UnicodeNormalization::None;
+    options.normalizer.case_fold=false;
     options.alignment.alignment_threshold = 75.0;
     options.alignment.anchor_threshold = 95.0;
     options.pass_threshold = 100.0;

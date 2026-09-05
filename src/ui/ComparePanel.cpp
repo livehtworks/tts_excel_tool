@@ -86,6 +86,9 @@ ComparePanel::ComparePanel(wxWindow* parent, ApplicationRuntime& runtime)
     pass_threshold_->Bind(wxEVT_SPINCTRLDOUBLE, &ComparePanel::OnInputChanged, this);
     ignore_punctuation_->Bind(wxEVT_CHECKBOX, &ComparePanel::OnInputChanged, this);
     compare_button_ = new wxButton(this, wxID_ANY, WxUtf8("自动对齐"));
+    cancel_button_=new wxButton(this,wxID_ANY,WxUtf8("取消对比"));
+    cancel_button_->Disable();
+    cancel_button_->Bind(wxEVT_BUTTON,[this](wxCommandEvent&) { comparison_cancel_.request_stop(); cancel_button_->Disable(); SetStatus(WxUtf8("正在取消")); });
     export_button_ = new wxButton(this, wxID_ANY, WxUtf8("导出 Excel"));
     status_ = new wxStaticText(this, wxID_ANY, WxUtf8("就绪"));
     compare_button_->Bind(wxEVT_BUTTON, &ComparePanel::OnCompare, this);
@@ -96,6 +99,7 @@ ComparePanel::ComparePanel(wxWindow* parent, ApplicationRuntime& runtime)
     thresholds->Add(pass_threshold_, 0, wxRIGHT, 18);
     thresholds->Add(ignore_punctuation_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 18);
     thresholds->Add(compare_button_, 0, wxRIGHT, 8);
+    thresholds->Add(cancel_button_,0,wxRIGHT,8);
     thresholds->Add(export_button_, 0, wxRIGHT, 12);
     thresholds->Add(status_, 1, wxALIGN_CENTER_VERTICAL);
     root->Add(thresholds, 0, wxLEFT | wxRIGHT | wxBOTTOM, 10);
@@ -114,6 +118,7 @@ ComparePanel::ComparePanel(wxWindow* parent, ApplicationRuntime& runtime)
 void ComparePanel::BeginShutdown() {
     if (closing_) return;
     closing_ = true;
+    comparison_cancel_.request_stop();
     busy_ = true;
     Disable();
 }
@@ -198,25 +203,39 @@ void ComparePanel::OnCompare(wxCommandEvent&) {
         return;
     }
     const auto captured_revision = input_revision_;
+    comparison_cancel_=std::stop_source{};
+    auto request_cancel=comparison_cancel_;
+    InvalidateReport();
     SetBusy(true, WxUtf8("对比中"));
-    runtime_.BackgroundJobs().Submit([this, groups, options, delimiter, captured_revision](std::stop_token token) {
+    runtime_.BackgroundJobs().Submit([this, groups, options, delimiter, captured_revision, request_cancel](std::stop_token token) mutable {
         try {
+            std::stop_callback shutdown_callback(token,[&] { request_cancel.request_stop(); });
+            CompareExecutionContext context; context.stop=request_cancel.get_token();
+            context.progress=[this,captured_revision](std::size_t done,std::size_t total) {
+                CallAfter([this,captured_revision,done,total] {
+                    if(closing_ || !busy_ || captured_revision!=input_revision_ || comparison_cancel_.stop_requested()) return;
+                    SetStatus(WxUtf8("对比中 "+std::to_string(done)+" / "+std::to_string(total)));
+                });
+            };
             CompareService service;
             std::vector<CompareReportGroup> reports;
             reports.reserve(groups.size());
             TextImportOptions import_options;
             import_options.delimiter = delimiter;
             for (const auto& group : groups) {
+                context.Check();
                 if (token.stop_requested()) return;
                 const auto reference = TextFileImporter::ReadUtf8Records(group.reference_path, import_options);
                 if (token.stop_requested()) return;
                 const auto actual = TextFileImporter::ReadUtf8Records(group.actual_path, import_options);
                 if (token.stop_requested()) return;
-                reports.push_back({group.label, service.Compare(reference, actual, options)});
+                reports.push_back({group.label, service.Compare(reference, actual, options,&context)});
             }
+            context.Check();
             if (token.stop_requested()) return;
-            CallAfter([this, captured_revision, reports = std::move(reports)]() mutable {
+            CallAfter([this, captured_revision, request_cancel, reports = std::move(reports)]() mutable {
                 if (closing_ || IsBeingDeleted()) return;
+                if(request_cancel.stop_requested()) { InvalidateReport(); SetBusy(false,WxUtf8("已取消")); return; }
                 if (captured_revision != input_revision_) return;
                 report_groups_ = std::make_shared<const std::vector<CompareReportGroup>>(std::move(reports));
                 report_revision_ = captured_revision;
@@ -303,7 +322,7 @@ CompareOptions ComparePanel::CurrentOptions() const {
     CompareOptions options;
     options.normalizer.ignore_punctuation = ignore_punctuation_->GetValue();
     options.normalizer.case_fold = true;
-    options.normalizer.unicode_nfkc = true;
+    options.normalizer.normalization = UnicodeNormalization::Nfkc;
     options.alignment.alignment_threshold = align_threshold_->GetValue();
     options.alignment.anchor_threshold = 95.0;
     options.pass_threshold = pass_threshold_->GetValue();
@@ -364,6 +383,7 @@ void ComparePanel::SetBusy(bool busy, const wxString& message) {
     add_group_->Enable(!busy);
     remove_group_->Enable(!busy && !input_groups_.empty());
     compare_button_->Enable(!busy);
+    cancel_button_->Enable(busy && !comparison_cancel_.stop_requested());
     export_button_->Enable(!busy && report_groups_ && !report_groups_->empty() && report_revision_ == input_revision_);
     SetStatus(message);
 }

@@ -1,6 +1,7 @@
 #include "core/unicode/Utf8.h"
 
 #include <array>
+#include <stdexcept>
 
 #ifdef ADAYO_HAS_UTF8PROC
 #include <utf8proc.h>
@@ -15,7 +16,7 @@ bool IsContinuation(unsigned char c) {
 }
 }
 
-std::u32string Decode(std::string_view utf8) {
+static std::u32string DecodeImpl(std::string_view utf8, bool strict) {
     std::u32string out;
     out.reserve(utf8.size());
 
@@ -23,6 +24,7 @@ std::u32string Decode(std::string_view utf8) {
     while (i < utf8.size()) {
         const auto c0 = static_cast<unsigned char>(utf8[i]);
         if (c0 < 0x80U) {
+            if(strict && c0==0) throw std::runtime_error("Embedded NUL at byte "+std::to_string(i));
             out.push_back(static_cast<char32_t>(c0));
             ++i;
             continue;
@@ -38,12 +40,14 @@ std::u32string Decode(std::string_view utf8) {
         } else if ((c0 & 0xF8U) == 0xF0U) {
             length = 4; cp = c0 & 0x07U; min_cp = 0x10000;
         } else {
+            if(strict) throw std::runtime_error("Invalid UTF-8 at byte "+std::to_string(i));
             out.push_back(kReplacement);
             ++i;
             continue;
         }
 
         if (i + static_cast<std::size_t>(length) > utf8.size()) {
+            if(strict) throw std::runtime_error("Truncated UTF-8 at byte "+std::to_string(i));
             out.push_back(kReplacement);
             break;
         }
@@ -59,6 +63,7 @@ std::u32string Decode(std::string_view utf8) {
         }
 
         if (!valid || cp < min_cp || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+            if(strict) throw std::runtime_error("Invalid UTF-8 at byte "+std::to_string(i));
             out.push_back(kReplacement);
             ++i;
             continue;
@@ -69,11 +74,14 @@ std::u32string Decode(std::string_view utf8) {
     }
     return out;
 }
+std::u32string Decode(std::string_view utf8) { return DecodeImpl(utf8,false); }
+std::u32string DecodeStrict(std::string_view utf8) { return DecodeImpl(utf8,true); }
 
 std::string Encode(std::u32string_view text) {
     std::string out;
     out.reserve(text.size() * 2);
     for (char32_t cp : text) {
+        if(cp>=0xD800 && cp<=0xDFFF) cp=kReplacement;
         if (cp <= 0x7F) {
             out.push_back(static_cast<char>(cp));
         } else if (cp <= 0x7FF) {

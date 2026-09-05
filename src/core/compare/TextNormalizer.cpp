@@ -3,6 +3,7 @@
 #include "core/unicode/Utf8.h"
 
 #include <cstdlib>
+#include <stdexcept>
 
 #ifdef ADAYO_HAS_UTF8PROC
 #include <utf8proc.h>
@@ -11,13 +12,15 @@
 namespace adayo {
 namespace {
 std::string ApplyUnicodeMap(std::string_view raw, const NormalizerOptions& options) {
+    if(options.normalization==UnicodeNormalization::None && !options.case_fold) return std::string(raw);
 #ifndef ADAYO_HAS_UTF8PROC
-    (void)options;
+    throw std::runtime_error("UNSUPPORTED_UNICODE: normalization/casefold requires utf8proc");
 #endif
 #ifdef ADAYO_HAS_UTF8PROC
     utf8proc_uint8_t* mapped = nullptr;
-    utf8proc_option_t flags = static_cast<utf8proc_option_t>(UTF8PROC_STABLE | UTF8PROC_COMPOSE);
-    if (options.unicode_nfkc) {
+    utf8proc_option_t flags = UTF8PROC_STABLE;
+    if(options.normalization!=UnicodeNormalization::None) flags=static_cast<utf8proc_option_t>(flags|UTF8PROC_COMPOSE);
+    if (options.normalization==UnicodeNormalization::Nfkc) {
         flags = static_cast<utf8proc_option_t>(flags | UTF8PROC_COMPAT);
     }
     if (options.case_fold) {
@@ -34,14 +37,15 @@ std::string ApplyUnicodeMap(std::string_view raw, const NormalizerOptions& optio
         return result;
     }
     if (mapped) std::free(mapped);
+    throw std::runtime_error("Unicode normalization failed");
 #endif
-    return std::string(raw);
 }
 }
 
 TextNormalizer::TextNormalizer(NormalizerOptions options) : options_(options) {}
 
 std::string TextNormalizer::Normalize(std::string_view raw) const {
+    (void)unicode::DecodeStrict(raw);
     const std::string unicode_mapped = ApplyUnicodeMap(raw, options_);
     auto cps = unicode::Decode(unicode_mapped);
 
@@ -50,12 +54,6 @@ std::string TextNormalizer::Normalize(std::string_view raw) const {
     bool last_was_space = false;
 
     for (char32_t cp : cps) {
-#ifndef ADAYO_HAS_UTF8PROC
-        // Fallback keeps Unicode code points intact. Full NFKC/casefold is a production dependency task.
-        if (options_.case_fold && cp >= U'A' && cp <= U'Z') {
-            cp = static_cast<char32_t>(cp - U'A' + U'a');
-        }
-#endif
         if (options_.ignore_punctuation && unicode::IsPunctuation(cp)) {
             continue;
         }

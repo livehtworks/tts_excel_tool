@@ -7,10 +7,26 @@
 #include <iostream>
 #include <set>
 #include <stdexcept>
+#include "core/unicode/Utf8.h"
+#include "platform/UnicodePath.h"
+#include <fstream>
+#include <cstdlib>
+#include <cmath>
+#ifdef ADAYO_HAS_JSON_CONFIG
+#include <nlohmann/json.hpp>
+#endif
 
 using namespace adayo;
 
 namespace {
+CompareOptions SupportedMathOptions() {
+    CompareOptions options{};
+#ifndef ADAYO_HAS_UTF8PROC
+    options.normalizer.normalization=UnicodeNormalization::None;
+    options.normalizer.case_fold=false;
+#endif
+    return options;
+}
 void AssertUniqueIndexes(const std::vector<CompareRow>& rows) {
     std::set<std::size_t> refs;
     std::set<std::size_t> acts;
@@ -35,14 +51,21 @@ bool ContainsExtra(const std::vector<CompareRow>& rows, const std::string& text)
 }
 
 void TestFixedAlignmentSet() {
+#ifndef ADAYO_HAS_UTF8PROC
+    bool unsupported=false;
+    try { CompareService{}.Compare({"sample"},{"sample"}); } catch(const std::runtime_error& ex) { unsupported=std::string(ex.what()).find("UNSUPPORTED_UNICODE")!=std::string::npos; }
+    REQUIRE(unsupported);
+    std::cout << "SKIPPED_UNSUPPORTED: full NFKC/casefold fixture requires utf8proc; explicit rejection verified\n";
+    return;
+#endif
     CompareService service;
-    CompareOptions options;
+    auto options=SupportedMathOptions();
     options.alignment.alignment_threshold = 75.0;
     options.alignment.anchor_threshold = 95.0;
     options.pass_threshold = 100.0;
     options.normalizer.ignore_punctuation = true;
     options.normalizer.case_fold = true;
-    options.normalizer.unicode_nfkc = true;
+    options.normalizer.normalization = UnicodeNormalization::Nfkc;
 
     const std::vector<std::string> reference = {
         "打开空调",
@@ -86,14 +109,14 @@ void TestFixedAlignmentSet() {
 
 void TestPunctuationSwitch() {
     CompareService service;
-    CompareOptions loose;
+    auto loose=SupportedMathOptions();
     loose.normalizer.ignore_punctuation = true;
     loose.pass_threshold = 100.0;
     auto rows = service.Compare({"hello!"}, {"hello"}, loose);
     REQUIRE(rows.size() == 1);
     REQUIRE(rows[0].status == CompareStatus::Ok);
 
-    CompareOptions strict;
+    auto strict=SupportedMathOptions();
     strict.normalizer.ignore_punctuation = false;
     strict.pass_threshold = 100.0;
     rows = service.Compare({"hello!"}, {"hello"}, strict);
@@ -103,7 +126,7 @@ void TestPunctuationSwitch() {
 void TestUnicodePunctuationWithUtf8proc() {
 #ifdef ADAYO_HAS_UTF8PROC
     CompareService service;
-    CompareOptions options;
+    auto options=SupportedMathOptions();
     options.normalizer.ignore_punctuation = true;
     options.pass_threshold = 100.0;
     auto rows = service.Compare({"مرحبا، بالعالم؛"}, {"مرحبا بالعالم"}, options);
@@ -116,7 +139,7 @@ void TestUnicodePunctuationWithUtf8proc() {
 
 void TestAnchorCannotBypassAlignmentThreshold() {
     CompareService service;
-    CompareOptions options;
+    auto options=SupportedMathOptions();
     options.alignment.alignment_threshold = 99.0;
     options.alignment.anchor_threshold = 95.0;
     options.pass_threshold = 100.0;
@@ -128,7 +151,7 @@ void TestAnchorCannotBypassAlignmentThreshold() {
 
 void TestInvalidThresholdsRejected() {
     CompareService service;
-    CompareOptions options;
+    auto options=SupportedMathOptions();
     options.alignment.alignment_threshold = 101.0;
     bool threw = false;
     try {
@@ -138,7 +161,7 @@ void TestInvalidThresholdsRejected() {
     }
     REQUIRE(threw);
 
-    options = {};
+    options = SupportedMathOptions();
     options.alignment.alignment_threshold = 90.0;
     options.pass_threshold = 80.0;
     threw = false;
@@ -152,7 +175,7 @@ void TestInvalidThresholdsRejected() {
 
 void TestCompareMatrixBudgetRejectsOversizeInput() {
     CompareService service;
-    CompareOptions options;
+    auto options=SupportedMathOptions();
     options.alignment.alignment_threshold = 70.0;
     options.pass_threshold = 100.0;
     std::vector<std::string> reference(9000, "same");
@@ -233,7 +256,7 @@ void TestTextImporterSkipsUnicodeWhitespaceOnlyRecords() {
 
 void TestPerformance1000() {
     CompareService service;
-    CompareOptions options;
+    auto options=SupportedMathOptions();
     options.alignment.alignment_threshold = 70.0;
     options.alignment.anchor_threshold = 95.0;
     std::vector<std::string> reference;
@@ -256,7 +279,7 @@ void TestPerformance1000() {
 void TestPerformance5000WithRapidfuzz() {
 #ifdef ADAYO_HAS_RAPIDFUZZ
     CompareService service;
-    CompareOptions options;
+    auto options=SupportedMathOptions();
     options.alignment.alignment_threshold = 70.0;
     options.alignment.anchor_threshold = 95.0;
     std::vector<std::string> reference;
@@ -282,8 +305,58 @@ void TestPerformance5000WithRapidfuzz() {
 }
 } // namespace
 
+void TestStrictImportAndIndelGoldens() {
+    TextSimilarity similarity;
+    struct Golden {std::string left,right; double score;};
+    for(const auto& golden:std::vector<Golden>{{"abc","ab",80},{"a","b",0},{"","",100},{"","你好",0},{"打开空调","关闭空调",50},{"温度22","温度23",75},{"ab","ba",50},{"🙂甲","🙂乙",50}})
+        REQUIRE(std::abs(similarity.Ratio(golden.left,golden.right)-golden.score)<1e-9);
+    REQUIRE(unicode::Encode(std::u32string(1,0xD800))=="\xEF\xBF\xBD");
+    TextImportOptions preserve; preserve.empty_records=EmptyRecordPolicy::PreserveInternal;
+    REQUIRE(TextFileImporter::SplitUtf8Records("a\n\nb\n",preserve)==std::vector<std::string>({"a","","b"}));
+    REQUIRE(TextFileImporter::SplitUtf8Records("\n",preserve)==std::vector<std::string>({""}));
+    REQUIRE(TextFileImporter::SplitUtf8Records("",preserve).empty());
+    bool rejected=false; try{TextFileImporter::SplitUtf8Records("\xEF\xBB\xBF\xFF");}catch(const std::runtime_error&){rejected=true;} REQUIRE(rejected);
+#ifdef ADAYO_HAS_JSON_CONFIG
+    if(const auto* environment=std::getenv("ADAYO_REVIEW_WORKPACK")) {
+        const auto root=PathFromUtf8(environment);
+        std::ifstream input(root/"fixtures"/"text_import_cases.json");const auto fixture=nlohmann::json::parse(input);
+        for(const auto& item:fixture.at("cases")) {
+            TextImportOptions options;options.skip_empty=item.value("skip_empty",true);options.delimiter=item.value("delimiter",std::string{});
+            if(!options.skip_empty) options.empty_records=EmptyRecordPolicy::PreserveInternal;
+            const auto encoding=item.at("encoding").get<std::string>();
+            if(encoding=="utf8") options.encoding=TextEncoding::Utf8;
+            if(encoding=="utf16be") options.encoding=TextEncoding::Utf16BE;
+            bool failed=false; std::vector<std::string> records;
+            try{records=TextFileImporter::ReadUtf8Records(root/"fixtures"/"text_import"/item.at("file").get<std::string>(),options);}catch(const std::runtime_error&){failed=true;}
+            if(item.contains("expected_error")) REQUIRE(failed);
+            else { REQUIRE(!failed); REQUIRE(records==item.at("expected").get<std::vector<std::string>>()); }
+        }
+        std::cout << "PASS 15 external text import fixtures\n";
+    } else std::cout << "External text fixtures: NOT_RUN\n";
+#endif
+}
+void TestCompareBudgetAndCancellation() {
+    CompareExecutionContext context;
+    std::stop_source stop;context.stop=stop.get_token();
+    context.progress=[&](std::size_t,std::size_t){stop.request_stop();};
+    bool canceled=false;
+    try{CompareService{}.Compare(std::vector<std::string>(1000,"same"),std::vector<std::string>(1000,"same"),SupportedMathOptions(),&context);}
+    catch(const std::runtime_error& ex){canceled=std::string(ex.what())=="COMPARE_CANCELED";}
+    REQUIRE(canceled); REQUIRE(context.used_bytes==8ull*1024*1024);
+    REQUIRE(CompareService{}.Compare({"again"},{"again"},SupportedMathOptions()).at(0).status==CompareStatus::Ok);
+    bool rejected=false; try{CharacterDiff{}.Diff(std::string(20000,'a'),std::string(20000,'b'));}catch(const std::runtime_error&){rejected=true;} REQUIRE(rejected);
+    const std::string prefix(65535,'a');
+    const auto diff=CharacterDiff{}.Diff(prefix+"b",prefix+"c");
+    std::string joined;for(const auto& fragment:diff.reference_fragments) joined+=fragment.text; REQUIRE(joined==prefix+"b");
+    CompareExecutionContext measured;
+    CompareService{}.Compare(std::vector<std::string>(100,"same"),std::vector<std::string>(100,"same"),SupportedMathOptions(),&measured);
+    REQUIRE(measured.used_bytes==8ull*1024*1024); REQUIRE(measured.peak_bytes>measured.used_bytes); REQUIRE(measured.peak_bytes<=CompareExecutionContext::budget_bytes);
+}
+
 int main() {
     return test::RunTestMain("adayo_p6_compare_tests", [] {
+        TestStrictImportAndIndelGoldens();
+        TestCompareBudgetAndCancellation();
         TestFixedAlignmentSet();
         TestPunctuationSwitch();
         TestUnicodePunctuationWithUtf8proc();
