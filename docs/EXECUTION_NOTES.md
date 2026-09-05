@@ -90,3 +90,4 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 - The September review uses create-only outputs under `dist/review-<HEAD>-<run_id>/AdayoCorpusTool`. Existing targets are rejected; the established runtime directory and its model/config/export/cache data are protected.
 - Packaging does not create a ZIP unless `-Zip` is passed; the user packages ZIPs manually during development.
 - The canonical model source remains `dist/AdayoCorpusTool/model`. Isolated review packages copy only manifest-listed models with source/destination hash verification; the script does not download or change the source models.
+- UCRT `api-ms-win-*` imports can be loader contracts without physical sibling DLLs. Packaging resolves only API-set names through the System32-only Windows loader and verifies the resulting module path; an arbitrary or nonexistent name is never accepted by prefix alone.

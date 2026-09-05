@@ -212,12 +212,43 @@ function Test-DependencyClosure([string]$PackageDir) {
         $seen[$key] = $true
         foreach ($dep in Get-Dependents $dumpbin $binary) {
             if ($allow.ContainsKey($dep)) { continue }
+            if (Test-SystemApiSet $dep) { continue }
             if (-not $known.ContainsKey($dep)) {
                 throw "Unresolved non-system DLL dependency '$dep' required by $binary"
             }
             $queue.Enqueue($known[$dep])
         }
     }
+}
+
+function Test-SystemApiSet([string]$Name) {
+    if ($Name -notmatch '^(api-ms-win-|ext-ms-win-)[a-z0-9-]+\.dll$') { return $false }
+    if (-not ('AdayoPackaging.NativeLoader' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+namespace AdayoPackaging {
+    public static class NativeLoader {
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        public static extern IntPtr LoadLibraryExW(string name, IntPtr file, uint flags);
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        public static extern uint GetModuleFileNameW(IntPtr module, StringBuilder name, int size);
+        [DllImport("kernel32.dll")]
+        public static extern bool FreeLibrary(IntPtr module);
+    }
+}
+'@
+    }
+    $handle=[AdayoPackaging.NativeLoader]::LoadLibraryExW($Name,[IntPtr]::Zero,0x800)
+    if ($handle -eq [IntPtr]::Zero) { return $false }
+    try {
+        $buffer=[Text.StringBuilder]::new(32768)
+        $length=[AdayoPackaging.NativeLoader]::GetModuleFileNameW($handle,$buffer,$buffer.Capacity)
+        if (-not $length -or $length -ge $buffer.Capacity) { return $false }
+        $systemPrefix=([Environment]::SystemDirectory).TrimEnd('\')+'\'
+        return $buffer.ToString().StartsWith($systemPrefix,[StringComparison]::OrdinalIgnoreCase)
+    } finally { [void][AdayoPackaging.NativeLoader]::FreeLibrary($handle) }
 }
 
 $sourceCommit = & git -C (Resolve-RepoPath '.') rev-parse HEAD

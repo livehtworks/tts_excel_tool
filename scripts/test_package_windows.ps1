@@ -22,6 +22,8 @@ if (@(Get-TreeDigest $dest).Count -ne 3) { throw 'Tree copy lost files' }
 $rejected = $false
 try { Get-Dependents (Join-Path $env:SystemRoot 'System32\cmd.exe') 'nonexistent.dll' | Out-Null } catch { $rejected = $true }
 if (-not $rejected) { throw 'dumpbin failure was accepted' }
+if (-not (Test-SystemApiSet 'api-ms-win-crt-convert-l1-1-0.dll')) { throw 'Actual UCRT API set did not resolve to System32' }
+if (Test-SystemApiSet 'api-ms-win-nonexistent-adayo-l1-1-0.dll') { throw 'Nonexistent API set was accepted' }
 $final = Join-Path $TestRoot 'AdayoCorpusTool'
 foreach ($dir in @('config','exports','cache','model')) {
     New-Item -ItemType Directory -Path (Join-Path $final $dir) -Force | Out-Null
