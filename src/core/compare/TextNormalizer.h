@@ -10,6 +10,7 @@ class TextNormalizer {
 public:
     explicit TextNormalizer(NormalizerOptions options = {});
     std::string Normalize(std::string_view raw) const;
+    std::u32string NormalizeCodepoints(std::u32string_view raw) const;
     const NormalizerOptions& Options() const noexcept { return options_; }
 
 private:

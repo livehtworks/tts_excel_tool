@@ -15,7 +15,7 @@ struct AudioCacheStats {
     std::uint64_t used_bytes{}, memory_bytes{}, active_limit{}, epoch{}, evicted{}, skipped{};
     std::size_t entries{}, deleted_entries{}, failed_entries{};
     std::uint64_t deleted_bytes{};
-    bool disk_enabled{}, clearing{};
+    bool disk_enabled{}, clearing{}, accounting_valid{true};
     std::string warning;
 };
 struct AudioCacheHit {

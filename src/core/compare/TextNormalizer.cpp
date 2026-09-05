@@ -50,9 +50,12 @@ std::string ApplyUnicodeMap(std::string_view raw, const NormalizerOptions& optio
 TextNormalizer::TextNormalizer(NormalizerOptions options) : options_(options) {}
 
 std::string TextNormalizer::Normalize(std::string_view raw) const {
-    (void)unicode::DecodeStrict(raw);
-    const std::string unicode_mapped = ApplyUnicodeMap(raw, options_);
-    auto cps = unicode::Decode(unicode_mapped);
+    return unicode::Encode(NormalizeCodepoints(unicode::DecodeStrict(raw)));
+}
+std::u32string TextNormalizer::NormalizeCodepoints(std::u32string_view raw) const {
+    auto cps=options_.normalization==UnicodeNormalization::None && !options_.case_fold?
+        std::u32string(raw):unicode::DecodeStrict(ApplyUnicodeMap(unicode::Encode(raw),options_));
+    for(auto cp:cps) if(cp==0 || (cp>=0xd800 && cp<=0xdfff) || cp>0x10ffff) throw std::invalid_argument("Invalid Unicode code point");
 
     std::u32string out;
     out.reserve(cps.size());
@@ -74,7 +77,7 @@ std::string TextNormalizer::Normalize(std::string_view raw) const {
     if (options_.trim) {
         out = unicode::Trim(out);
     }
-    return unicode::Encode(out);
+    return out;
 }
 
 } // namespace adayo

@@ -14,6 +14,10 @@
 #include <mutex>
 #include <stdexcept>
 #include <thread>
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 using namespace adayo;
 
@@ -21,6 +25,8 @@ namespace {
 class FakeTtsEngine final : public ITtsEngine {
 public:
     std::string Id() const override { return "fake"; }
+    std::string RuntimeIdentity() const override { return runtime_identity; }
+    std::string runtime_identity{"fake-runtime-v1"};
     bool IsLoaded() const noexcept override { return loaded_; }
     void Load(const TtsModelConfig& config) override {
         ++load_count;
@@ -341,7 +347,7 @@ void TestRepeatedStopDuringSynthesis() {
 }
 
 std::filesystem::path NewCacheTestRoot() {
-    auto root=std::filesystem::temp_directory_path()/("adayo-cache-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto root=test::IsolatedRoot()/("adayo-cache-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     REQUIRE(std::filesystem::create_directory(root));
     return root;
 }
@@ -437,14 +443,88 @@ void TestCacheCapacityAndLru() {
     REQUIRE(cache.Stats().memory_bytes<=640); REQUIRE(cache.Stats().used_bytes<=options.disk_limit_bytes);
     auto held2=cache.Get(c,"voice",0); REQUIRE(held2.audio);
 #ifdef ADAYO_HAS_JSON_CONFIG
-    auto small=options; small.disk_limit_bytes=32;
+    auto small_limits=options; small_limits.disk_limit_bytes=32;
     const auto oldLimit=cache.Stats().active_limit;
-    bool rejected=false; try{cache.Configure(small);}catch(const std::runtime_error&){rejected=true;}
+    bool rejected=false; try{cache.Configure(small_limits);}catch(const std::runtime_error&){rejected=true;}
     REQUIRE(rejected); REQUIRE(cache.Stats().active_limit==oldLimit);
 #endif
     auto disabled=options; disabled.enabled=false; cache.Configure(disabled);
     const auto entries=cache.Stats().entries;
     REQUIRE(!cache.Get(c,"voice",0).audio); cache.Put(a,"voice",fresh,0); REQUIRE(cache.Stats().entries==entries);
+}
+
+void TestCacheFilesystemFailures() {
+#if defined(ADAYO_HAS_JSON_CONFIG) && defined(_WIN32)
+    const auto root=NewCacheTestRoot();
+    const auto directory=root/"tts-v1";
+    auto config=CacheTestConfig(root);
+    const auto model_hash=FileSha256(root/"model.onnx");
+    std::string key;
+    {
+        TtsService service;service.SetEngine(std::make_unique<FakeTtsEngine>());service.InitializeCache(directory,{});
+        const auto result=service.Prepare("voice",config,{"fault","en-US",0,1});
+        key=result.timings.key;
+        const auto wav=directory/(key+".wav");
+        const auto locked=CreateFileW(wav.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+        REQUIRE(locked!=INVALID_HANDLE_VALUE);
+        service.Cache()->BeginClear();
+        const auto partial=service.Cache()->FinishClear();
+        CloseHandle(locked);
+        REQUIRE(partial.failed_entries==1); REQUIRE(partial.used_bytes>0); REQUIRE(partial.entries>0);
+        REQUIRE(!partial.warning.empty()); REQUIRE(result.audio->samples.size()==160);
+        service.Cache()->BeginClear();
+        const auto clear=service.Cache()->FinishClear();
+        REQUIRE(clear.failed_entries==0); REQUIRE(clear.entries==0);
+        auto audio=std::make_shared<AudioBuffer>();audio->sample_rate=16000;audio->samples.assign(160,0.1f);
+        const auto fail_key=Sha256("read-only-metadata");
+        const auto metadata=directory/(fail_key+".json");
+        WriteBinaryFile(metadata,"{}",2);
+        REQUIRE(SetFileAttributesW(metadata.c_str(),FILE_ATTRIBUTE_READONLY));
+        service.Cache()->Put(fail_key,"voice",audio,clear.epoch);
+        const auto failed=service.Cache()->Stats();
+        REQUIRE(SetFileAttributesW(metadata.c_str(),FILE_ATTRIBUTE_NORMAL));
+        REQUIRE(failed.skipped>0); REQUIRE(!failed.warning.empty()); REQUIRE(failed.used_bytes>2);
+        service.Cache()->BeginClear(); REQUIRE(service.Cache()->FinishClear().failed_entries==0);
+    }
+    const auto orphan=directory/(key+".wav.tmp-123-456-789");
+    const auto unknown=directory/"unrelated.tmp";
+    WriteBinaryFile(orphan,"orphan",6);WriteBinaryFile(unknown,"KEEP",4);
+    {
+        AudioCache cache(directory,{});
+        REQUIRE(cache.Stats().disk_enabled); REQUIRE(!std::filesystem::exists(orphan)); REQUIRE(std::filesystem::exists(unknown));
+    }
+    const auto foreign=root/"foreign";std::filesystem::create_directory(foreign);WriteBinaryFile(foreign/"sentinel","KEEP",4);
+    { AudioCache cache(foreign,{}); REQUIRE(!cache.Stats().disk_enabled); cache.BeginClear();cache.FinishClear(); }
+    REQUIRE(FileSha256(foreign/"sentinel")==Sha256("KEEP"));
+    const auto link=root/"linked-cache";
+    if(CreateSymbolicLinkW(link.c_str(),foreign.c_str(),SYMBOLIC_LINK_FLAG_DIRECTORY|SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)) {
+        AudioCache cache(link,{}); REQUIRE(!cache.Stats().disk_enabled); REQUIRE(!cache.Stats().warning.empty());
+        cache.BeginClear();cache.FinishClear();
+        REQUIRE(FileSha256(foreign/"sentinel")==Sha256("KEEP"));
+    } else if(const auto* environment=std::getenv("ADAYO_REVIEW_CACHE_JUNCTION")) {
+        const auto junction=PathFromUtf8(environment);
+        const auto attributes=GetFileAttributesW(junction.c_str());
+        REQUIRE(attributes!=INVALID_FILE_ATTRIBUTES); REQUIRE(attributes&FILE_ATTRIBUTE_REPARSE_POINT);
+        AudioCache cache(junction,{}); REQUIRE(!cache.Stats().disk_enabled); REQUIRE(!cache.Stats().warning.empty());
+        cache.BeginClear();cache.FinishClear();
+        REQUIRE(FileSha256(junction/"sentinel")==Sha256("KEEP"));
+        std::cout<<"PASS: native cache rejects directory junction without modifying its target\n";
+    } else std::cout<<"BLOCKED: reparse injection requires symlink privilege or isolated junction fixture, error="<<GetLastError()<<"\n";
+    REQUIRE(FileSha256(root/"model.onnx")==model_hash);
+    {
+        TtsService tts; auto* engine=new FakeTtsEngine();tts.SetEngine(std::unique_ptr<ITtsEngine>(engine));
+        tts.InitializeCache(root/"identity",{});const TtsRequest request{"identity","en-US",0,1};
+        auto previous=tts.Prepare("voice",config,request).timings.key;
+        WriteBinaryFile(root/"tokens.txt","changed tokens",14);
+        auto next=tts.Prepare("voice",config,request).timings.key;REQUIRE(next!=previous);previous=next;
+        engine->runtime_identity="fake-runtime-v2";
+        next=tts.Prepare("voice",config,request).timings.key;REQUIRE(next!=previous);
+        auto limits=AudioCacheOptions{};limits.disk_limit_bytes=8192;
+        AudioCache tiny(root/"tiny",limits);
+        auto audio=std::make_shared<AudioBuffer>();audio->sample_rate=16000;audio->samples.assign(16000,0.2f);
+        tiny.Put(Sha256("large"),"voice",audio,0); REQUIRE(tiny.Stats().skipped==1); REQUIRE(tiny.Stats().entries==0);
+    }
+#endif
 }
 
 class HandoffPlayer final : public IAudioPlayer {
@@ -505,10 +585,9 @@ void TestWorkerQueueDiscardPending() {
     std::mutex mutex;
     std::condition_variable cv;
     bool first_started = false;
-    bool release_first = false;
     int executed = 0;
 
-    queue.Submit([&](std::stop_token) {
+    queue.Submit([&](std::stop_token stop) {
         {
             std::lock_guard lock(mutex);
             first_started = true;
@@ -516,7 +595,8 @@ void TestWorkerQueueDiscardPending() {
         }
         cv.notify_all();
         std::unique_lock lock(mutex);
-        cv.wait(lock, [&] { return release_first; });
+        std::stop_callback stopped(stop,[&] { cv.notify_all(); });
+        cv.wait(lock, [&] { return stop.stop_requested(); });
     });
     queue.Submit([&](std::stop_token) { ++executed; });
 
@@ -527,12 +607,6 @@ void TestWorkerQueueDiscardPending() {
     std::jthread stopper([&] {
         queue.Stop(StopMode::DiscardPending);
     });
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    {
-        std::lock_guard lock(mutex);
-        release_first = true;
-    }
-    cv.notify_all();
     stopper.join();
     REQUIRE(executed == 1);
 }
@@ -596,6 +670,7 @@ int main() {
         TestCacheServiceIdentityAndRestart();
         TestCacheEpochAndCancelableConcurrentMiss();
         TestCacheCapacityAndLru();
+        TestCacheFilesystemFailures();
         TestWorkerQueueDiscardPending();
         TestWorkerQueueStopIsIdempotentAndConstructionIsStable();
         TestWorkerQueueUnhandledTaskErrorDoesNotTerminateWorker();

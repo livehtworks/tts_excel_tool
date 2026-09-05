@@ -90,6 +90,7 @@ std::string TtsService::ModelIdentity(const TtsModelConfig& config, bool require
         Field(snapshot,std::to_string(std::filesystem::last_write_time(path).time_since_epoch().count()));
 #endif
     }
+    if(!fingerprints_.contains(configuration) && fingerprints_.size()>=64) fingerprints_.erase(fingerprints_.begin());
     auto& cached=fingerprints_[configuration];
     if (cached.snapshot==snapshot && !cached.digest.empty()) return cached.digest;
     std::string content=configuration;

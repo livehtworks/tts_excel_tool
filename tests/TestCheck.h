@@ -7,8 +7,24 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <filesystem>
+#include <chrono>
+#include <random>
 
 namespace adayo::test {
+
+inline const std::filesystem::path& IsolatedRoot() {
+    static const auto root=[] {
+        for(int attempt=0;attempt<32;++attempt) {
+            const auto path=std::filesystem::temp_directory_path()/("adayo-native-"+
+                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+"-"+
+                std::to_string(std::random_device{}()));
+            if(std::filesystem::create_directory(path)) return path;
+        }
+        throw std::runtime_error("Cannot reserve an isolated test root");
+    }();
+    return root;
+}
 
 class TestFailure final : public std::runtime_error {
 public:
@@ -48,6 +64,7 @@ void RequireNear(const A& actual, const B& expected, const E& epsilon, const cha
 template <typename Func>
 int RunTestMain(const char* test_name, Func&& func) {
     try {
+        std::cout << "Isolated artifacts: " << IsolatedRoot().string() << "\n";
         std::forward<Func>(func)();
         std::cout << test_name << ": PASS\n";
         return 0;

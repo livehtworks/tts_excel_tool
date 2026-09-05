@@ -18,7 +18,7 @@ Application Services
   - TtsService
   - PlaybackService
   - CompareService
-  - ExportService
+  - LibXlsxWriterExporter (adapter invoked by the background job)
         |
         v
 Pure C++ Core
@@ -94,7 +94,7 @@ Worker 完成后用 wxThreadEvent / CallAfter 回 UI。
 
 `TtsService -> ITtsEngine` 是唯一稳定边界。
 
-- 选择 voice 时加载一次模型；
+- 请求音频时先验证完整 voice/config/asset 身份；缓存命中不加载模型、不合成；
 - 同一 voice 连续合成默认复用 engine；
 - 切换 voice 时显式 unload/load；
 - UI 只构造播放请求，不在 wx 事件处理函数里加载或卸载 TTS 模型；
@@ -106,7 +106,7 @@ Worker 完成后用 wxThreadEvent / CallAfter 回 UI。
 
 - 文件路径：使用 `std::filesystem::path` 作为 domain/service 边界，不在上层转换成 ANSI `char*`。
 - 文本：业务层保存 UTF-8；文本算法开始时 decode 为 code point 序列。
-- 正式生产归一化：utf8proc NFKC + casefold（按配置）+ 空白处理 + 可选标点忽略。
+- 正式生产归一化由四个版本化预设及其完整选项决定：None/NFC/NFKC、casefold、空白与标点处理。严格模式按原文判等，CER/WER 和 Indel 使用不同的度量与通过条件。
 - OpenXLSX 直接打开请求的 Unicode workbook path；libxlsxwriter 通过 memory output buffer + native filesystem write 输出到请求路径；不得重新引入临时 ASCII staging。
 - sherpa-onnx v1.13.6 的模型路径必须通过中文目录硬门禁后才能宣称支持。
 
@@ -129,9 +129,12 @@ Core 永远只接收 `WorksheetData` / `RuntimeView` / `CompareRow`。
 - TTS 模型常驻到切换 voice；
 - 直接从 TTS 得到 float PCM buffer；
 - PCM 直接交 AudioPlayer；
-- 不为“播放一条”写磁盘；只有用户点击保存 WAV 才落盘；
+- 启用音频缓存时将有效 PCM 持久化到受管 cache/tts-v1；不是播放临时文件，播放仍直接消费 PCM；
 - Excel 分析不得无条件复制整个 workbook 多份；
 - 1000 条文本对齐必须在普通 CPU 可用范围，最终用 benchmark 固定门槛。
+- CompareExecutionContext 统一约束 512MiB 算法分配峰值；多组报告、评分矩阵、DP/trace、原文/归一化和字符差异均计入。每次对比独立取消，不停止整个 BackgroundJobWorker。
+
+工作簿来源和持久化所有权见 `DATA_FACTS.md`；当前实现与验收状态见 `PROJECT_STATUS.md`，历史审核记录不是当前验收结论。
 
 ## 8. 不允许擅自扩展
 

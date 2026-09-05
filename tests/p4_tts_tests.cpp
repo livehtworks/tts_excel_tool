@@ -7,6 +7,12 @@
 #include <nlohmann/json.hpp>
 
 #include "TestCheck.h"
+#ifdef ADAYO_HAS_MINIAUDIO
+#include "adapters/audio/MiniaudioPlayer.h"
+#include <miniaudio.h>
+#include <mutex>
+#include <thread>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -141,12 +147,12 @@ void CopyDirectory(const std::filesystem::path& source, const std::filesystem::p
 
 void TestSherpaUnicodePathGate() {
     const std::filesystem::path source_root = std::filesystem::path(ADAYO_MODELS_DIR) / "sherpa";
-    const auto gate_root = std::filesystem::temp_directory_path() /
-        "公司中文工具" / "Adayo语料测试" / "模型" / "中文语音模型";
+    const auto gate_root = test::IsolatedRoot() /
+        PathFromUtf8("公司中文工具/Adayo语料测试/模型/中文语音模型");
     const auto unicode_sherpa_root = gate_root / "model" / "sherpa";
     std::filesystem::remove_all(gate_root);
-    CopyDirectory(source_root / "vits-piper-en_US-amy-low", unicode_sherpa_root / "英文Voice目录");
-    CopyDirectory(source_root / "vits-piper-zh_CN-xiao_ya-medium-int8", unicode_sherpa_root / "中文Voice目录");
+    CopyDirectory(source_root / "vits-piper-en_US-amy-low", unicode_sherpa_root / PathFromUtf8("英文Voice目录"));
+    CopyDirectory(source_root / "vits-piper-zh_CN-xiao_ya-medium-int8", unicode_sherpa_root / PathFromUtf8("中文Voice目录"));
 
     ModelRegistry registry(unicode_sherpa_root);
     const auto entries = registry.ScanSherpaModels();
@@ -178,11 +184,86 @@ void TestSherpaUnicodePathGate() {
 }
 } // namespace
 
+#ifdef ADAYO_HAS_MINIAUDIO
+struct LoopbackCapture {
+    ma_context context{};
+    ma_device device{};
+    bool context_ready=false,device_ready=false;
+    std::mutex mutex;
+    std::vector<float> samples;
+    ~LoopbackCapture() { if(device_ready) ma_device_uninit(&device); if(context_ready) ma_context_uninit(&context); }
+    void Start(std::int32_t rate) {
+        const ma_backend backend=ma_backend_wasapi;
+        if(ma_context_init(&backend,1,nullptr,&context)!=MA_SUCCESS) throw std::runtime_error("BLOCKED: WASAPI context unavailable");
+        context_ready=true;
+        auto config=ma_device_config_init(ma_device_type_loopback);
+        config.capture.format=ma_format_f32; config.capture.channels=1; config.sampleRate=rate;
+        config.pUserData=this;
+        config.dataCallback=[](ma_device* device,void*,const void* input,ma_uint32 frames) {
+            if(!input) return;
+            auto& self=*static_cast<LoopbackCapture*>(device->pUserData);
+            std::lock_guard lock(self.mutex);
+            if(self.samples.size()+frames>384000*120ull) return;
+            const auto* values=static_cast<const float*>(input);
+            self.samples.insert(self.samples.end(),values,values+frames);
+        };
+        samples.reserve(static_cast<std::size_t>(rate)*30);
+        if(ma_device_init(&context,&config,&device)!=MA_SUCCESS) throw std::runtime_error("BLOCKED: WASAPI loopback initialization failed");
+        device_ready=true;
+        if(ma_device_start(&device)!=MA_SUCCESS) throw std::runtime_error("BLOCKED: WASAPI loopback start failed");
+    }
+    std::vector<float> Finish() {
+        if(ma_device_stop(&device)!=MA_SUCCESS) throw std::runtime_error("Loopback stop failed");
+        std::lock_guard lock(mutex); return samples;
+    }
+};
+double Correlation(const std::vector<float>& expected,const std::vector<float>& captured,std::size_t begin,std::size_t end,
+                   std::size_t offset) {
+    double dot=0,xx=0,yy=0;
+    for(auto i=begin;i<end;i+=8) {
+        const auto j=i+offset; if(j>=captured.size()) return 0;
+        dot+=expected[i]*captured[j]; xx+=expected[i]*expected[i]; yy+=captured[j]*captured[j];
+    }
+    return xx>0 && yy>0?dot/std::sqrt(xx*yy):0;
+}
+void VerifyLoopback(const AudioBuffer& audio,const std::vector<float>& captured,const std::filesystem::path& path) {
+    REQUIRE(audio.channels==1); REQUIRE(!captured.empty());
+    ma_encoder encoder{};
+    const auto config=ma_encoder_config_init(ma_encoding_format_wav,ma_format_f32,1,audio.sample_rate);
+    REQUIRE(ma_encoder_init_file_w(path.c_str(),&config,&encoder)==MA_SUCCESS);
+    ma_uint64 written=0;
+    const auto write=ma_encoder_write_pcm_frames(&encoder,captured.data(),captured.size(),&written);
+    ma_encoder_uninit(&encoder);
+    REQUIRE(write==MA_SUCCESS); REQUIRE(written==captured.size());
+    const auto& expected=audio.samples;
+    auto first=std::find_if(expected.begin(),expected.end(),[](float v){return std::abs(v)>0.01f;});
+    auto last=std::find_if(expected.rbegin(),expected.rend(),[](float v){return std::abs(v)>0.01f;});
+    REQUIRE(first!=expected.end()); REQUIRE(last!=expected.rend());
+    const auto begin=static_cast<std::size_t>(first-expected.begin());
+    const auto end=expected.size()-static_cast<std::size_t>(last-expected.rbegin());
+    const auto window=std::min(static_cast<std::size_t>(audio.sample_rate/4),(end-begin)/2);
+    double best=0;std::size_t offset=0;
+    for(std::size_t candidate=0;candidate<static_cast<std::size_t>(audio.sample_rate);++candidate) {
+        const auto value=Correlation(expected,captured,begin,begin+window,candidate);
+        if(value>best) { best=value;offset=candidate; }
+    }
+    const auto tail=Correlation(expected,captured,end-window,end,offset);
+    std::cout<<"LOOPBACK head_correlation="<<best<<",tail_correlation="<<tail<<",offset_frames="<<offset<<"\n";
+    REQUIRE(best>0.7); REQUIRE(tail>0.7); REQUIRE(captured.size()>=end+offset);
+}
+#endif
+
 int main(int argc, char** argv) {
-    if(argc==6 && std::string(argv[1])=="--cache-probe") {
+    if(argc==6 && (std::string(argv[1])=="--cache-probe" || std::string(argv[1])=="--audio-probe")) {
         return test::RunTestMain("adayo_p4_real_cache_probe",[&] {
             const auto root=PathFromUtf8(argv[2]);
             const auto mode=std::string(argv[3]), language=std::string(argv[4]);
+            const bool loopback=std::string(argv[1])=="--audio-probe";
+#ifdef ADAYO_HAS_MINIAUDIO
+            MiniaudioPlayer player;
+#else
+            if(loopback) throw std::runtime_error("BLOCKED: miniaudio unavailable");
+#endif
             std::ifstream input(PathFromUtf8(argv[5])); const auto fixture=nlohmann::json::parse(input);
             ModelRegistry registry(std::filesystem::path(ADAYO_MODELS_DIR)/"sherpa");
             const auto entries=registry.ScanSherpaModels();
@@ -197,14 +278,33 @@ int main(int argc, char** argv) {
             for(const auto& sample:fixture.at("samples")) {
                 if(sample.at("language_code").get<std::string>()!=language) continue;
                 TtsRequest request{sample.at("text").get<std::string>(),language,model.config.speaker_id,1.0};
+                if(mode=="memory") service.Prepare(model.id,model.config,request);
+                const auto item_begin=std::chrono::steady_clock::now();
                 auto result=service.Prepare(model.id,model.config,request);
-                if(mode=="memory") result=service.Prepare(model.id,model.config,request);
                 RequireUsableAudio(*result.audio);
                 if(mode=="memory" || mode=="disk") {
                     REQUIRE(result.timings.source==mode); REQUIRE(result.timings.load_call_delta==0); REQUIRE(result.timings.synth_call_delta==0);
                 } else { REQUIRE(result.timings.source=="synth"); REQUIRE(result.timings.load_call_delta==0); }
                 const auto& t=result.timings;
                 const auto hash=Sha256(std::string_view(reinterpret_cast<const char*>(result.audio->samples.data()),result.audio->samples.size()*sizeof(float)));
+#ifdef ADAYO_HAS_MINIAUDIO
+                if(loopback) {
+                    LoopbackCapture capture; capture.Start(result.audio->sample_rate);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+                    auto context=std::make_shared<AudioPlaybackContext>();
+                    context->request_id=index;
+                    context->item_started=item_begin;
+                    player.Play(*result.audio,context);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                    const auto captured=capture.Finish();
+                    const auto audio_root=root/language/"loopback"/mode;
+                    std::filesystem::create_directories(audio_root);
+                    VerifyLoopback(*result.audio,captured,audio_root/(std::to_string(index)+".wav"));
+                    REQUIRE(context->first_nonzero_ms); REQUIRE(context->playback_done_ms);
+                    std::cout<<"DEVICE request="<<index<<",device_init_ms="<<context->device_init_ms<<",first_nonzero_ms="<<*context->first_nonzero_ms
+                        <<",playback_done_ms="<<*context->playback_done_ms<<"\n";
+                }
+#endif
                 std::cout << index++ << ',' << language << ',' << mode << ',' << t.key_build_ms << ',' << t.model_validation_ms << ',' << t.lookup_ms << ',' << t.model_load_ms << ','
                     << t.synth_ms << ',' << t.cache_read_ms << ',' << t.cache_write_ms << ',' << t.audio_prepare_ms << ',' << t.source << ',' << t.load_call_delta << ',' << t.synth_call_delta << ',' << hash << '\n';
             }

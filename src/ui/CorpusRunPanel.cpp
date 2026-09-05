@@ -54,7 +54,7 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent, ApplicationRuntime& runtime)
     cache_limit_=new wxSpinCtrl(this,wxID_ANY);
     cache_limit_->SetRange(128,16384);
     cache_limit_->SetValue(static_cast<int>(runtime_.ConfigSnapshot().audio_cache.disk_limit_bytes/(1024*1024)));
-    cache_status_=new wxStaticText(this,wxID_ANY,wxString{});
+    cache_status_=new wxStaticText(this,wxID_ANY,wxString{},wxDefaultPosition,wxDefaultSize,wxST_ELLIPSIZE_END);
     clear_cache_=new wxButton(this,wxID_ANY,WxUtf8("清空音频缓存"));
     cache_bar->Add(cache_enabled_,0,wxALIGN_CENTER_VERTICAL|wxRIGHT,6);
     cache_bar->Add(new wxStaticText(this,wxID_ANY,WxUtf8("磁盘上限(MiB)")),0,wxALIGN_CENTER_VERTICAL|wxRIGHT,4);
@@ -63,21 +63,30 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent, ApplicationRuntime& runtime)
     cache_bar->Add(clear_cache_,0);
     root->Add(cache_bar,0,wxEXPAND|wxLEFT|wxRIGHT|wxBOTTOM,6);
     auto configure_cache=[this](wxCommandEvent&) {
+        if(!runtime_.ConfigSaveAllowed()) return;
         auto options=runtime_.ConfigSnapshot().audio_cache;
+        const auto previous=options;
         options.enabled=cache_enabled_->GetValue();
         options.disk_limit_bytes=static_cast<std::uint64_t>(cache_limit_->GetValue())*1024*1024;
         cache_enabled_->Disable(); cache_limit_->Disable();
-        runtime_.BackgroundJobs().Submit([this,options](std::stop_token token) {
+        runtime_.BackgroundJobs().Submit([this,options,previous](std::stop_token token) {
             std::string error;
             try {
                 if (token.stop_requested()) return;
                 runtime_.Tts().Cache()->Configure(options);
                 runtime_.UpdateConfig([&](AppConfig& config){config.audio_cache=options;});
                 runtime_.SaveConfig();
-            } catch(const std::exception& ex) { error=ex.what(); runtime_.Logger().Warn("cache",error); }
+            } catch(const std::exception& ex) {
+                error=ex.what();
+                try {
+                    runtime_.Tts().Cache()->Configure(previous);
+                    runtime_.UpdateConfig([&](AppConfig& config){config.audio_cache=previous;});
+                } catch(const std::exception& restore) { error+="; restore failed: "+std::string(restore.what()); }
+                runtime_.Logger().Warn("cache",error);
+            }
             CallAfter([this,error] {
                 if(closing_) return;
-                cache_enabled_->Enable(); cache_limit_->Enable();
+                cache_enabled_->Enable(runtime_.ConfigSaveAllowed()); cache_limit_->Enable(runtime_.ConfigSaveAllowed());
                 cache_enabled_->SetValue(runtime_.ConfigSnapshot().audio_cache.enabled);
                 cache_limit_->SetValue(static_cast<int>(runtime_.Tts().Cache()->Stats().active_limit/(1024*1024)));
                 UpdateCacheUi(); if(!error.empty()) cache_status_->SetLabel(WxUtf8(error));
@@ -86,6 +95,7 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent, ApplicationRuntime& runtime)
     };
     cache_enabled_->Bind(wxEVT_CHECKBOX,configure_cache);
     cache_limit_->Bind(wxEVT_SPINCTRL,configure_cache);
+    cache_enabled_->Enable(runtime_.ConfigSaveAllowed()); cache_limit_->Enable(runtime_.ConfigSaveAllowed());
     clear_cache_->Bind(wxEVT_BUTTON,[this](wxCommandEvent&) {
         if(wxMessageBox(WxUtf8("只清本工具的音频缓存，不删除模型、配置或结果，不中断已开始的声音。确认清空？"),WxUtf8("清空音频缓存"),wxYES_NO|wxNO_DEFAULT|wxICON_QUESTION,this)!=wxYES) return;
         runtime_.Tts().Cache()->BeginClear();
@@ -196,9 +206,10 @@ void CorpusRunPanel::BeginShutdown() {
 void CorpusRunPanel::UpdateCacheUi() {
     if(!runtime_.Tts().Cache()) return;
     const auto stats=runtime_.Tts().Cache()->Stats();
-    const auto label=std::to_string(stats.used_bytes/(1024*1024))+" / "+std::to_string(stats.active_limit/(1024*1024))+" MiB, "+
+    const auto label=(stats.accounting_valid?std::to_string(stats.used_bytes/(1024*1024)):std::string("占用未确认"))+" / "+std::to_string(stats.active_limit/(1024*1024))+" MiB, "+
         std::to_string(stats.entries)+" 条"+(stats.clearing ? "，清理中" : "")+(stats.warning.empty() ? "" : "，"+stats.warning);
     cache_status_->SetLabel(WxUtf8(label));
+    cache_status_->SetToolTip(WxUtf8(label));
 }
 
 void CorpusRunPanel::SetSession(CorpusSession session) {

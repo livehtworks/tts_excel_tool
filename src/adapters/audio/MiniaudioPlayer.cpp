@@ -62,6 +62,8 @@ void DataCallback(ma_device* device, void* output, const void*, ma_uint32 frame_
     }
     const auto to_copy = (std::min)(requested, remaining);
     std::copy_n(impl->samples.data() + impl->cursor, to_copy, out);
+    if(!context->first_nonzero_ms && std::any_of(out,out+to_copy,[](float sample){return sample!=0;}))
+        context->first_nonzero_ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-context->item_started).count();
     impl->cursor += to_copy;
     // Wait for the next device period before stopping, so the final buffer can drain.
 }
@@ -127,6 +129,7 @@ void MiniaudioPlayer::Play(const AudioBuffer& audio, const std::shared_ptr<Audio
     }
 
     Stop();
+    const auto device_begin=std::chrono::steady_clock::now();
     {
         std::lock_guard device_lock(impl_->device_mutex);
         EnsureDevice(*impl_, audio.sample_rate, audio.channels);
@@ -134,6 +137,7 @@ void MiniaudioPlayer::Play(const AudioBuffer& audio, const std::shared_ptr<Audio
     {
         std::lock_guard request_lock(context->mutex);
         if (context->canceled) return;
+        context->device_init_ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-device_begin).count();
         std::lock_guard lock(impl_->mutex);
         impl_->context.store(context);
         impl_->samples = audio.samples;
@@ -163,6 +167,10 @@ void MiniaudioPlayer::Play(const AudioBuffer& audio, const std::shared_ptr<Audio
         if (impl_->device_initialized) {
             ma_device_stop(&impl_->device);
         }
+    }
+    {
+        std::lock_guard request_lock(context->mutex);
+        context->playback_done_ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-context->item_started).count();
     }
 #else
     (void)audio;

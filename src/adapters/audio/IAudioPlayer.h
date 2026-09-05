@@ -5,6 +5,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <stop_token>
+#include <chrono>
 
 namespace adayo {
 struct AudioPlaybackContext {
@@ -14,6 +15,9 @@ struct AudioPlaybackContext {
     bool canceled{false};
     bool paused{false};
     std::stop_source cancellation;
+    std::chrono::steady_clock::time_point item_started{std::chrono::steady_clock::now()};
+    double device_init_ms{};
+    std::optional<double> first_nonzero_ms, playback_done_ms;
 };
 
 class IAudioPlayer {

@@ -41,13 +41,16 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 - The user explicitly allowed proxy usage for C++ dependency installation. Keep model/voice downloads on domestic mirrors and avoid proxy for large model files.
 - Shared presets read `VCPKG_ROOT` and `ADAYO_SHERPA_ONNX_ROOT` from the environment. This machine's local values live only in ignored `CMakeUserPresets.json`.
 
-## OpenXLSX
-
 ## Audio Cache / Windows IO
 
 - Close the metadata input stream before atomically replacing that metadata file: Windows open handles without delete sharing prevent replacement.
 - Cache LRU timestamps must distinguish successive operations within one clock tick; timestamp ties must not evict a more recent entry by hash ordering.
 - Cache acceptance uses fresh external roots. Do not run fault/clear/quota tests against the application's established cache or model directory.
+- LRU metadata updates reserve bounded temporary space but do not rescan every cache file on every memory hit; quota-changing operations still recount the tree.
+- Native tests use a process-unique root, and Chinese filesystem components must use `PathFromUtf8`. A narrow UTF-8 path literal on Windows creates a mojibake directory even with `/utf-8`.
+- Windows headers define `small` as a macro; avoid it as a local identifier in native tests.
+- Unprivileged symlink creation is unavailable on this workstation. `scripts/new_cache_junction_fixture.ps1` creates an isolated junction for `ADAYO_REVIEW_CACHE_JUNCTION`; P5 checks rejection without touching the target.
+- `scripts/test_export_xml.ps1` verifies actual ZIP/XML red runs from the P7 artifact directory. Native OpenXLSX content readback remains a separate assertion.
 
 ## OpenXLSX
 

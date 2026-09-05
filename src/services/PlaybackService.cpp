@@ -3,8 +3,8 @@
 #include <utility>
 
 namespace adayo {
-PlaybackService::PlaybackService(TtsService& tts, IAudioPlayer& player, ErrorHandler on_error)
-    : tts_(tts), player_(player), on_error_(std::move(on_error)) {}
+PlaybackService::PlaybackService(TtsService& tts, IAudioPlayer& player, ErrorHandler on_error, TimingHandler on_timing)
+    : tts_(tts), player_(player), on_error_(std::move(on_error)), on_timing_(std::move(on_timing)) {}
 PlaybackService::~PlaybackService() { Shutdown(); }
 
 void PlaybackService::Shutdown() {
@@ -132,9 +132,24 @@ void PlaybackService::RunSequence(PlaybackRequest request, const std::shared_ptr
                 current_row_ = item.row_index; current_column_ = item.column_index;
             }
             if (!item.request.text.empty()) {
+                {
+                    std::lock_guard request_lock(context->mutex);
+                    context->item_started=std::chrono::steady_clock::now();
+                    context->first_nonzero_ms.reset(); context->playback_done_ms.reset(); context->device_init_ms=0;
+                }
                 auto prepared = tts_.Prepare(request.model_id, request.model_config, item.request, context->cancellation.get_token());
                 if (!WaitReady(context) || !SetRequestState(context, PlaybackState::Playing)) break;
                 player_.Play(*prepared.audio, context);
+                if(on_timing_) {
+                    std::optional<double> first,done;
+                    double device_ms; bool canceled;
+                    {
+                        std::lock_guard request_lock(context->mutex);
+                        first=context->first_nonzero_ms; done=context->playback_done_ms;
+                        device_ms=context->device_init_ms; canceled=context->canceled;
+                    }
+                    on_timing_(context->request_id,i,prepared.timings,device_ms,first,done,canceled);
+                }
             }
             if (i + 1 < request.items.size() && !WaitInterval(request.interval, context)) break;
         }

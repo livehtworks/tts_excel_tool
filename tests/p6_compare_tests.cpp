@@ -272,7 +272,8 @@ void TestPerformance1000() {
     const auto rows = service.Compare(reference, actual, options);
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
     AssertUniqueIndexes(rows);
-    REQUIRE(rows.size() >= reference.size());
+    REQUIRE(rows.size() == reference.size());
+    for(const auto& row:rows) if(row.actual_index) { REQUIRE(row.reference_index); REQUIRE(row.reference_text==row.actual_text); REQUIRE(row.status==CompareStatus::Ok); }
     std::cout << "P6 1000x992 compare elapsed_ms=" << elapsed << "\n";
 }
 
@@ -297,8 +298,26 @@ void TestPerformance5000WithRapidfuzz() {
     const auto rows = service.Compare(reference, actual, options);
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
     AssertUniqueIndexes(rows);
-    REQUIRE(rows.size() >= reference.size());
+    REQUIRE(rows.size() == reference.size());
+    for(const auto& row:rows) if(row.actual_index) { REQUIRE(row.reference_index); REQUIRE(row.reference_text==row.actual_text); REQUIRE(row.status==CompareStatus::Ok); }
     std::cout << "P6 5000x4990 compare elapsed_ms=" << elapsed << "\n";
+    for(bool matching:{true,false}) {
+        CompareExecutionContext context;
+        options.alignment.alignment_threshold=100;
+        const auto begin=std::chrono::steady_clock::now();
+        const auto repeated=service.Compare(std::vector<std::string>(5000,"aaaa"),
+            std::vector<std::string>(5000,matching?"aaaa":"bbbb"),options,&context);
+        AssertUniqueIndexes(repeated);
+        REQUIRE(repeated.size()==(matching?5000:10000));
+        for(const auto& row:repeated) {
+            if(matching) { REQUIRE(row.reference_index==row.actual_index); REQUIRE(row.status==CompareStatus::Ok); }
+            else REQUIRE(row.status==CompareStatus::Missing || row.status==CompareStatus::Extra);
+        }
+        std::cout<<"P6 5000 repeated matching="<<matching<<" elapsed_ms="<<
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-begin).count()<<
+            " peak_budget_bytes="<<context.peak_bytes<<"\n";
+        REQUIRE(context.peak_bytes<=CompareExecutionContext::budget_bytes);
+    }
 #else
     std::cout << "P6 rapidfuzz not enabled; skipping 5000-row performance assertion\n";
 #endif
@@ -385,6 +404,12 @@ void TestFourProfiles() {
     if(const auto* environment=std::getenv("ADAYO_REVIEW_WORKPACK")) {
         std::ifstream input(PathFromUtf8(environment)/"fixtures"/"compare_cases.json");
         const auto fixtures=nlohmann::json::parse(input);
+        for(const auto& c:fixtures.at("strict_pairs")) {
+            const auto row=service.Compare({c.at("left")},{c.at("right")},strict)[0];
+            REQUIRE((row.status==CompareStatus::Ok)==c.at("expected_equal").get<bool>());
+            REQUIRE(joined(row.diff.reference_fragments)==row.reference_text);
+            REQUIRE(joined(row.diff.actual_fragments)==row.actual_text);
+        }
         for(const auto& c:fixtures.at("score_cases")) {
             const auto row=service.Compare({c.at("left")},{c.at("right")},strict)[0];
             REQUIRE(std::abs(row.similarity-c.at("levenshtein_similarity").get<double>())<1e-9);

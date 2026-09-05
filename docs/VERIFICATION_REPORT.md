@@ -1,6 +1,6 @@
 # R8 Verification Report
 
-本报告记录当前工作区源码的本地自动化验证事实。R8 target-machine acceptance 仍未执行，因此 `P9_TARGET_MACHINE_ACCEPTANCE_REVOKED` 继续有效。
+本报告仅保留 R8 历史验证事实，不代表当前源码验收。当前 September 工作包进度和证据见 `REVIEW_EXECUTION_20260906.md` 与 `PROJECT_STATUS.md`。
 
 ## 已执行
 

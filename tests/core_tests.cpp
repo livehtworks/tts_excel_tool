@@ -5,6 +5,7 @@
 #include "core/workbook/ColumnAnalyzer.h"
 #include "core/workbook/ViewBuilder.h"
 #include "platform/UnicodePath.h"
+#include "platform/FileIo.h"
 #include "services/CompareService.h"
 #include "services/CorpusViewService.h"
 
@@ -128,9 +129,54 @@ static void TestReferenceEditInvalidatesRawRowResultsOnly() {
     REQUIRE(session.view.rows[2][3] == "✔");
 }
 
+static void TestAtomicWriteFaults() {
+    const auto root=test::IsolatedRoot()/"io-faults";
+    std::filesystem::create_directory(root);
+    const auto path=root/"config.json";
+    const std::string original="{original}",replacement="{replacement}";
+    WriteBinaryFileAtomically(path,original.data(),original.size());
+    const auto hash=FileSha256(path);
+    struct FaultOperations final:AtomicFileOperations {
+        int fault{};
+        std::size_t Write(std::FILE* file,const void* data,std::size_t size) override {
+            return AtomicFileOperations::Write(file,data,fault==0?size/2:size);
+        }
+        bool Flush(std::FILE* file) override { const bool ok=AtomicFileOperations::Flush(file); return ok && fault!=1; }
+        bool Close(std::FILE* file) override { const bool ok=AtomicFileOperations::Close(file); return ok && fault!=2; }
+        void Replace(const std::filesystem::path& from,const std::filesystem::path& to) override {
+            if(fault==3) throw std::runtime_error("Injected replace failure");
+            AtomicFileOperations::Replace(from,to);
+        }
+    } operations;
+    for(int fault=0;fault<4;++fault) {
+        operations.fault=fault;
+        bool rejected=false;
+        try { WriteBinaryFileAtomically(path,replacement.data(),replacement.size(),operations); }
+        catch(const std::runtime_error&) { rejected=true; }
+        REQUIRE(rejected); REQUIRE(FileSha256(path)==hash);
+        REQUIRE(std::distance(std::filesystem::directory_iterator(root),std::filesystem::directory_iterator{})==1);
+    }
+    struct Collision final:AtomicFileOperations {
+        std::filesystem::path other;
+        std::FILE* CreateExclusive(const std::filesystem::path& path) override {
+            other=path;
+            WriteBinaryFile(path,"OTHER",5);
+            return AtomicFileOperations::CreateExclusive(path);
+        }
+    } collision;
+    bool rejected=false;
+    try{WriteBinaryFileAtomically(path,replacement.data(),replacement.size(),collision);}catch(const std::runtime_error&){rejected=true;}
+    REQUIRE(rejected); REQUIRE(FileSha256(path)==hash);
+    REQUIRE(std::filesystem::exists(collision.other));
+    REQUIRE(FileSha256(collision.other)==Sha256("OTHER"));
+    WriteBinaryFileAtomically(path,replacement.data(),replacement.size());
+    REQUIRE(FileSha256(path)==Sha256(replacement));
+}
+
 int main() {
     return test::RunTestMain("adayo_core_tests", [] {
         TestUtf8();
+        TestAtomicWriteFaults();
         TestSimilarityUsesCodepoints();
         TestDiff();
         TestSequenceAlignmentMissing();

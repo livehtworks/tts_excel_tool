@@ -37,8 +37,24 @@ CorpusSession CorpusViewService::CreateSessionFromWorksheet(WorksheetData worksh
         std::map<std::size_t,std::size_t> indexes;
         for(std::size_t i=0;i<session.source_excel_row_numbers.size();++i) indexes[session.source_excel_row_numbers[i]]=i;
         std::vector<bool> projected(session.source_rows.size());
+        std::vector<const MergedRange*> relevant;
+        for(const auto& merge:session.merged_ranges)
+            if(column+1>=merge.first_column && column+1<=merge.last_column) relevant.push_back(&merge);
+        std::sort(relevant.begin(),relevant.end(),[](auto a,auto b){return a->first_row<b->first_row;});
+        std::vector<const MergedRange*> conflicts;
+        for(std::size_t begin=0;begin<relevant.size();) {
+            auto end=begin+1, last=relevant[begin]->last_row;
+            while(end<relevant.size() && relevant[end]->first_row<=last) {
+                last=std::max(last,relevant[end]->last_row); ++end;
+            }
+            if(end>begin+1) conflicts.insert(conflicts.end(),relevant.begin()+begin,relevant.begin()+end);
+            begin=end;
+        }
         for(const auto& merge:session.merged_ranges) {
             if(column+1<merge.first_column || column+1>merge.last_column) continue;
+            if(std::find(conflicts.begin(),conflicts.end(),&merge)!=conflicts.end()) {
+                session.diagnostics.push_back("Overlapping reference merge not projected: "+merge.reference); continue;
+            }
             if(merge.first_column!=merge.last_column) { session.diagnostics.push_back("Cross-column merge not projected: "+merge.reference); continue; }
             const auto anchor=indexes.find(merge.first_row);
             bool valid=anchor!=indexes.end() && merge.first_row>session.source.header_row && merge.first_row<=merge.last_row;

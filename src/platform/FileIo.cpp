@@ -53,6 +53,8 @@ void ReplaceFileAtomically(const std::filesystem::path& from, const std::filesys
 } // namespace
 
 void WriteBinaryFile(const std::filesystem::path& path, const void* data, std::size_t size) {
+    if(size>static_cast<std::size_t>((std::numeric_limits<std::streamsize>::max)()))
+        throw std::invalid_argument("Write size exceeds stream range");
     if (path.has_parent_path()) {
         std::filesystem::create_directories(path.parent_path());
     }
@@ -70,33 +72,51 @@ void WriteBinaryFile(const std::filesystem::path& path, const void* data, std::s
     if (!out) throw std::runtime_error("File close failed: " + PathToUtf8(path));
 }
 
-void WriteBinaryFileAtomically(const std::filesystem::path& path, const void* data, std::size_t size) {
-    if (path.has_parent_path()) {
-        std::filesystem::create_directories(path.parent_path());
-    }
-    const auto temp = TempSiblingPath(path);
-    try {
-        // Exclusive creation prevents a competing writer from owning our temporary file.
+std::FILE* AtomicFileOperations::CreateExclusive(const std::filesystem::path& temp) {
 #ifdef _WIN32
         int fd = -1;
         if (_wsopen_s(&fd, temp.c_str(), _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY,
             _SH_DENYRW, _S_IREAD | _S_IWRITE) != 0) throw std::runtime_error("Exclusive temporary creation failed");
         auto* file = _fdopen(fd, "wb");
-        if (!file) { _close(fd); throw std::runtime_error("Temporary stream open failed"); }
+        if (!file) { _close(fd); std::error_code ec; std::filesystem::remove(temp,ec); throw std::runtime_error("Temporary stream open failed"); }
 #else
         const int fd = open(temp.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0600);
         if (fd < 0) throw std::runtime_error("Exclusive temporary creation failed");
         auto* file = fdopen(fd, "wb");
-        if (!file) { close(fd); throw std::runtime_error("Temporary stream open failed"); }
+        if (!file) { close(fd); std::error_code ec; std::filesystem::remove(temp,ec); throw std::runtime_error("Temporary stream open failed"); }
 #endif
-        const bool written = size == 0 || std::fwrite(data, 1, size, file) == size;
-        const bool flushed = std::fflush(file) == 0;
-        const bool closed = std::fclose(file) == 0;
-        if (!written || !flushed || !closed) throw std::runtime_error("Temporary write/flush/close failed");
-        ReplaceFileAtomically(temp, path);
+    return file;
+}
+std::size_t AtomicFileOperations::Write(std::FILE* file,const void* data,std::size_t size) { return std::fwrite(data,1,size,file); }
+bool AtomicFileOperations::Flush(std::FILE* file) { return std::fflush(file)==0; }
+bool AtomicFileOperations::Close(std::FILE* file) { return std::fclose(file)==0; }
+void AtomicFileOperations::Replace(const std::filesystem::path& from,const std::filesystem::path& to) { ReplaceFileAtomically(from,to); }
+
+void WriteBinaryFileAtomically(const std::filesystem::path& path, const void* data, std::size_t size) {
+    AtomicFileOperations operations;
+    WriteBinaryFileAtomically(path,data,size,operations);
+}
+void WriteBinaryFileAtomically(const std::filesystem::path& path, const void* data, std::size_t size, AtomicFileOperations& operations) {
+    if(path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
+    const auto temp=TempSiblingPath(path);
+    std::FILE* file=nullptr;
+    bool owned=false;
+    try {
+        file=operations.CreateExclusive(temp);
+        if(!file) throw std::runtime_error("Exclusive temporary creation failed");
+        owned=true;
+        const bool written=size==0 || operations.Write(file,data,size)==size;
+        const bool flushed=operations.Flush(file);
+        auto* closing=file; file=nullptr;
+        const bool closed=operations.Close(closing);
+        if(!written) throw std::runtime_error("Temporary write failed");
+        if(!flushed) throw std::runtime_error("Temporary flush failed");
+        if(!closed) throw std::runtime_error("Temporary close failed");
+        operations.Replace(temp,path);
     } catch (...) {
+        if(file) std::fclose(file);
         std::error_code ec;
-        std::filesystem::remove(temp, ec);
+        if(owned) std::filesystem::remove(temp, ec);
         throw;
     }
 }

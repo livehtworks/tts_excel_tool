@@ -208,13 +208,17 @@ std::vector<AlignmentPair> SequenceAligner::Align(
     ValidateOptions(options);
 
     if (reference.empty()) {
+        auto memory=context->Reserve(CompareExecutionContext::Multiply(actual.size(),sizeof(AlignmentPair)),"unpaired actual output");
         std::vector<AlignmentPair> out;
-        for (std::size_t j = 0; j < actual.size(); ++j) out.push_back({std::nullopt, j, 0.0});
+        out.reserve(actual.size());
+        for (std::size_t j = 0; j < actual.size(); ++j) { context->Check(); out.push_back({std::nullopt, j, 0.0}); }
         return out;
     }
     if (actual.empty()) {
+        auto memory=context->Reserve(CompareExecutionContext::Multiply(reference.size(),sizeof(AlignmentPair)),"unpaired reference output");
         std::vector<AlignmentPair> out;
-        for (std::size_t i = 0; i < reference.size(); ++i) out.push_back({i, std::nullopt, 0.0});
+        out.reserve(reference.size());
+        for (std::size_t i = 0; i < reference.size(); ++i) { context->Check(); out.push_back({i, std::nullopt, 0.0}); }
         return out;
     }
 

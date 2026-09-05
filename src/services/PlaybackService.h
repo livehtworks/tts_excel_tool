@@ -40,8 +40,9 @@ struct PlaybackRequest {
 class PlaybackService {
 public:
     using ErrorHandler = std::function<void(const std::string&)>;
+    using TimingHandler = std::function<void(std::uint64_t,std::size_t,const TtsTimings&,double,std::optional<double>,std::optional<double>,bool)>;
 
-    PlaybackService(TtsService& tts, IAudioPlayer& player, ErrorHandler on_error = {});
+    PlaybackService(TtsService& tts, IAudioPlayer& player, ErrorHandler on_error = {}, TimingHandler on_timing = {});
     ~PlaybackService();
 
     void Play(PlaybackRequest request);
@@ -66,6 +67,7 @@ private:
     TtsService& tts_;
     IAudioPlayer& player_;
     ErrorHandler on_error_;
+    TimingHandler on_timing_;
     WorkerQueue worker_;
     mutable std::mutex mutex_;
     mutable std::condition_variable cv_;

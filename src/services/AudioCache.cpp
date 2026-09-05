@@ -72,6 +72,7 @@ struct AudioCache::Impl {
     std::mutex io;
     std::map<std::string,Entry> entries;
     AudioCacheStats stats;
+    bool owned_disk{false};
 #ifdef _WIN32
     HANDLE ownership{INVALID_HANDLE_VALUE};
 #endif
@@ -94,13 +95,18 @@ struct AudioCache::Impl {
     }
     void Recount() {
         std::uint64_t bytes = 0;
-        if (stats.disk_enabled) {
+        try { if (owned_disk) {
             for (const auto& file : std::filesystem::directory_iterator(root)) {
                 RequireOrdinaryPath(file.path());
                 if (file.is_regular_file()) bytes += file.file_size();
             }
+        } } catch(const std::exception& ex) {
+            std::lock_guard lock(state); stats.accounting_valid=false;
+            stats.warning=std::string("Cache occupancy cannot be verified: ")+ex.what();
+            throw;
         }
         std::lock_guard lock(state);
+        stats.accounting_valid=true;
         stats.used_bytes = bytes;
         stats.entries = entries.size();
         stats.memory_bytes = 0;
@@ -134,6 +140,19 @@ struct AudioCache::Impl {
         }
         stats.memory_bytes=bytes;
     }
+    void TouchMetadata(const std::string& key,const std::string& bytes) {
+        const auto path=root/(key+".json");
+        const auto old_size=std::filesystem::file_size(path);
+        bool room;
+        {
+            std::lock_guard lock(state);
+            room=stats.accounting_valid && stats.used_bytes<=options.disk_limit_bytes && bytes.size()+1024<=options.disk_limit_bytes-stats.used_bytes;
+        }
+        if(!room && !MakeRoom(bytes.size()+1024,0,options)) { Warn("Cache LRU timestamp skipped: quota"); return; }
+        WriteBinaryFileAtomically(path,bytes.data(),bytes.size());
+        std::lock_guard lock(state);
+        stats.used_bytes=stats.used_bytes>=old_size?stats.used_bytes-old_size+bytes.size():stats.used_bytes+bytes.size();
+    }
 };
 
 AudioCache::AudioCache(std::filesystem::path root, AudioCacheOptions options) : impl_(std::make_unique<Impl>()) {
@@ -160,6 +179,7 @@ AudioCache::AudioCache(std::filesystem::path root, AudioCacheOptions options) : 
             WriteBinaryFileAtomically(marker,value.data(),value.size());
         }
         impl_->stats.disk_enabled=true;
+        impl_->owned_disk=true;
         const std::regex temp("^[0-9a-f]{64}\\.(wav|json)\\.tmp-[0-9-]+$");
         for (const auto& file : std::filesystem::directory_iterator(impl_->root)) {
             RequireOrdinaryPath(file.path());
@@ -182,6 +202,7 @@ AudioCache::AudioCache(std::filesystem::path root, AudioCacheOptions options) : 
     } catch (const std::exception& ex) {
         impl_->stats.disk_enabled=false;
         impl_->Warn(ex.what());
+        try { impl_->Recount(); } catch (const std::exception& recount) { impl_->Warn(recount.what()); }
     }
 #else
     impl_->Warn("Persistent cache unsupported without Windows and JSON configuration support");
@@ -202,14 +223,29 @@ AudioCacheStats AudioCache::Stats() const { std::lock_guard lock(impl_->state); 
 AudioCacheHit AudioCache::Get(const std::string& key, const std::string& fingerprint, std::uint64_t epoch) {
     if (!KeyValid(key)) throw std::invalid_argument("Invalid cache key");
     std::lock_guard io(impl_->io);
+    std::shared_ptr<const AudioBuffer> memory_hit;
     {
         std::lock_guard lock(impl_->state);
         if (!impl_->options.enabled || impl_->stats.clearing || impl_->stats.epoch!=epoch) return {};
         auto it=impl_->entries.find(key);
         if (it==impl_->entries.end() || it->second.fingerprint!=fingerprint) return {};
         it->second.used=Now();
-        if (it->second.memory) return {it->second.memory,"memory"};
-        if (!impl_->stats.disk_enabled) return {};
+        memory_hit=it->second.memory;
+        if (!memory_hit && !impl_->stats.disk_enabled) return {};
+    }
+    if(memory_hit) {
+#ifdef ADAYO_HAS_JSON_CONFIG
+        if(impl_->stats.disk_enabled) try {
+            const auto path=impl_->root/(key+".json");
+            RequireOrdinaryPath(path);
+            if(std::filesystem::file_size(path)>16384) throw std::runtime_error("Cache metadata too large");
+            std::ifstream input(path); auto metadata=nlohmann::json::parse(input); input.close();
+            metadata["used"]=Now();
+            const auto bytes=metadata.dump();
+            impl_->TouchMetadata(key,bytes);
+        } catch(const std::exception& ex) { impl_->Warn(std::string("Cache LRU timestamp update failed: ")+ex.what()); }
+#endif
+        return {memory_hit,"memory"};
     }
 #ifdef ADAYO_HAS_JSON_CONFIG
     try {
@@ -239,7 +275,7 @@ AudioCacheHit AudioCache::Get(const std::string& key, const std::string& fingerp
         Validate(*audio);
         { std::lock_guard lock(impl_->state); impl_->entries[key].lease=audio; }
         j["used"]=Now(); const auto updated=j.dump();
-        if (impl_->MakeRoom(updated.size()+1024,0,impl_->options)) WriteBinaryFileAtomically(meta,updated.data(),updated.size());
+        impl_->TouchMetadata(key,updated);
         {
             std::lock_guard lock(impl_->state);
             if (impl_->stats.epoch!=epoch || impl_->stats.clearing) return {};
@@ -249,7 +285,7 @@ AudioCacheHit AudioCache::Get(const std::string& key, const std::string& fingerp
     } catch (const std::exception& ex) {
         impl_->Warn(std::string("Corrupt/unreadable audio cache entry: ")+ex.what());
         if (impl_->Remove(key)) { std::lock_guard lock(impl_->state); impl_->entries.erase(key); }
-        impl_->Recount();
+        try { impl_->Recount(); } catch (const std::exception& recount) { impl_->Warn(recount.what()); }
     }
 #endif
     return {};
@@ -289,7 +325,11 @@ void AudioCache::Put(const std::string& key, const std::string& fingerprint, std
         }
         if (stale && impl_->stats.disk_enabled) impl_->Remove(key);
         impl_->Recount();
-    } catch (const std::exception& ex) { impl_->Warn(std::string("Audio cache write skipped: ")+ex.what()); std::lock_guard lock(impl_->state); ++impl_->stats.skipped; }
+    } catch (const std::exception& ex) {
+        impl_->Warn(std::string("Audio cache write skipped: ")+ex.what());
+        try { impl_->Recount(); } catch (const std::exception& recount) { impl_->Warn(recount.what()); }
+        std::lock_guard lock(impl_->state); ++impl_->stats.skipped;
+    }
 }
 std::uint64_t AudioCache::BeginClear() {
     std::lock_guard lock(impl_->state);
@@ -301,16 +341,33 @@ std::uint64_t AudioCache::BeginClear() {
 }
 AudioCacheStats AudioCache::FinishClear() {
     std::lock_guard io(impl_->io);
+    try {
     std::vector<std::string> keys;
     { std::lock_guard lock(impl_->state); for (const auto& [key,entry]:impl_->entries) keys.push_back(key); impl_->stats.deleted_entries=0; impl_->stats.failed_entries=0; impl_->stats.deleted_bytes=0; }
+    if(impl_->owned_disk) {
+        for(const auto& file:std::filesystem::directory_iterator(impl_->root)) {
+            const auto key=file.path().stem().string();
+            if(KeyValid(key) && (file.path().extension()==".json" || file.path().extension()==".wav") &&
+               std::find(keys.begin(),keys.end(),key)==keys.end()) keys.push_back(key);
+        }
+    }
     for (const auto& key:keys) {
-        bool removed=!impl_->stats.disk_enabled || impl_->Remove(key);
+        bool removed=!impl_->owned_disk || impl_->Remove(key);
         std::lock_guard lock(impl_->state);
-        if (removed) { impl_->stats.deleted_bytes+=impl_->entries[key].bytes; ++impl_->stats.deleted_entries; impl_->entries.erase(key); }
+        if (removed) {
+            if(auto entry=impl_->entries.find(key);entry!=impl_->entries.end()) impl_->stats.deleted_bytes+=entry->second.bytes;
+            ++impl_->stats.deleted_entries; impl_->entries.erase(key);
+        }
         else ++impl_->stats.failed_entries;
     }
     impl_->Recount();
     { std::lock_guard lock(impl_->state); impl_->stats.clearing=false; if (impl_->stats.failed_entries) impl_->stats.warning="Audio cache clear partially failed"; }
+    } catch(const std::exception& ex) {
+        std::lock_guard lock(impl_->state);
+        impl_->stats.clearing=false; ++impl_->stats.failed_entries;
+        impl_->stats.accounting_valid=false;
+        impl_->stats.warning=std::string("Audio cache clear failed; occupancy is unverified: ")+ex.what();
+    }
     return Stats();
 }
 void AudioCache::Configure(AudioCacheOptions options) {

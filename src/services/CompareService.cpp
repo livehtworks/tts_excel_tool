@@ -153,8 +153,8 @@ std::vector<CompareRow> CompareService::Compare(
             record.raw_codepoints=unicode::DecodeStrict(input[i]);
             if(record.raw_codepoints.size()>CompareExecutionContext::record_codepoints)
                 throw std::runtime_error("Compare record exceeds 65536 codepoints");
-            record.normalized_text=normalizer.Normalize(input[i]);
-            record.normalized_codepoints=unicode::DecodeStrict(record.normalized_text);
+            record.normalized_codepoints=normalizer.NormalizeCodepoints(record.raw_codepoints);
+            record.normalized_text=unicode::Encode(record.normalized_codepoints);
             if(record.normalized_codepoints.size()>CompareExecutionContext::record_codepoints)
                 throw std::runtime_error("Normalized record exceeds 65536 codepoints");
             output.push_back(std::move(record));

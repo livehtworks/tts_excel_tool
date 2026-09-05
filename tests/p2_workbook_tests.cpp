@@ -96,9 +96,9 @@ void TestWorkbookReadAndAnalyze() {
 }
 
 void TestWorkbookReadFromChinesePath() {
-    const auto dir = std::filesystem::temp_directory_path() / "adayo_中文路径读取验证";
+    const auto dir = test::IsolatedRoot() / PathFromUtf8("adayo_中文路径读取验证");
     std::filesystem::create_directories(dir);
-    const auto copied = dir / "业务样本.xlsx";
+    const auto copied = dir / PathFromUtf8("业务样本.xlsx");
     std::filesystem::copy_file(FixturePath(), copied, std::filesystem::copy_options::overwrite_existing);
 
     OpenXlsxWorkbookReader reader;
@@ -153,7 +153,7 @@ void TestJsonConfigStoreRoundTrip() {
     config.sheet_mappings.push_back({"fixture:vehicle", "Vehicle", 2, saved_profiles});
     config.sheet_header_rows.push_back({"fixture:vehicle", "Vehicle", 2});
 
-    const auto path = std::filesystem::temp_directory_path() / "adayo_config_store_test" / "config.json";
+    const auto path = test::IsolatedRoot() / "adayo_config_store_test" / "config.json";
     JsonConfigStore store(path);
     store.Save(config);
     const auto loaded = store.Load();
@@ -178,7 +178,7 @@ void TestJsonConfigStoreRoundTrip() {
 }
 
 void TestJsonConfigCorruptBackupAndSafeSave() {
-    const auto dir = std::filesystem::temp_directory_path() / "adayo_config_store_corrupt_test";
+    const auto dir = test::IsolatedRoot() / "adayo_config_store_corrupt_test";
     const auto path = dir / "config.json";
     std::filesystem::create_directories(dir);
     {
@@ -205,7 +205,7 @@ void TestJsonConfigCorruptBackupAndSafeSave() {
 }
 
 void TestJsonConfigFutureSchemaRefusesOverwrite() {
-    const auto dir = std::filesystem::temp_directory_path() / "adayo_config_store_future_test";
+    const auto dir = test::IsolatedRoot() / "adayo_config_store_future_test";
     const auto path = dir / "config.json";
     std::filesystem::create_directories(dir);
     {
@@ -239,7 +239,7 @@ void TestJsonConfigFutureSchemaRefusesOverwrite() {
 }
 
 void TestJsonConfigV1LanguageMigrationDoesNotOverrideAnalyzer() {
-    const auto path = std::filesystem::temp_directory_path() / "adayo_config_store_test" / "config_v1.json";
+    const auto path = test::IsolatedRoot() / "adayo_config_store_test" / "config_v1.json";
     std::filesystem::create_directories(path.parent_path());
     {
         std::ofstream output(path, std::ios::binary | std::ios::trunc);
@@ -300,7 +300,7 @@ void TestJsonConfigV3FixedLanguageSurvivesWhenEqualToGuess() {
     columns[0].language_selection_mode = LanguageSelectionMode::Fixed;
     config.sheet_mappings.push_back({"fixture:vehicle", "Vehicle", 2, columns});
 
-    const auto path = std::filesystem::temp_directory_path() / "adayo_config_store_test" / "config_v3_fixed_equal_guess.json";
+    const auto path = test::IsolatedRoot() / "adayo_config_store_test" / "config_v3_fixed_equal_guess.json";
     JsonConfigStore store(path);
     store.Save(config);
     const auto loaded = store.Load();
@@ -336,7 +336,7 @@ void TestWorkbookMappingIdentityIncludesHeaderRow() {
 }
 
 void TestWorkbookIdentityIgnoresContentVersion() {
-    const auto path = std::filesystem::temp_directory_path() / "adayo_identity_version_test.xlsx";
+    const auto path = test::IsolatedRoot() / "adayo_identity_version_test.xlsx";
     {
         std::ofstream output(path, std::ios::binary | std::ios::trunc);
         output << "first";
@@ -384,7 +384,7 @@ void TestSavedLanguageOverrideSemantics() {
 }
 
 void TestModelRegistryKeepsValidModelsWhenOneIsBroken() {
-    const auto root = std::filesystem::temp_directory_path() / "adayo_model_registry_test";
+    const auto root = test::IsolatedRoot() / "adayo_model_registry_test";
     std::error_code ec;
     std::filesystem::remove_all(root, ec);
     std::filesystem::create_directories(root / "good" / "espeak-ng-data");
@@ -422,7 +422,7 @@ void WriteMinimalModel(const std::filesystem::path& dir, const std::string& id) 
 }
 
 void TestModelRegistryRejectsDuplicateIdsAndEscapingPaths() {
-    const auto root = std::filesystem::temp_directory_path() / "adayo_model_registry_security_test";
+    const auto root = test::IsolatedRoot() / "adayo_model_registry_security_test";
     std::error_code ec;
     std::filesystem::remove_all(root, ec);
     WriteMinimalModel(root / "dup-a", "dup");
@@ -627,7 +627,7 @@ int main() {
         TestJsonConfigV1LanguageMigrationDoesNotOverrideAnalyzer();
         TestJsonConfigV3FixedLanguageSurvivesWhenEqualToGuess();
         {
-            const auto root=std::filesystem::temp_directory_path()/("adayo-schema4-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+            const auto root=test::IsolatedRoot()/("adayo-schema4-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
             std::filesystem::create_directory(root);
             const std::string old=R"({"schema_version":3,"speech_rate":1.4,"alignment_threshold":83,"pass_threshold":99})";
             WriteBinaryFile(root/"config.json",old.data(),old.size());

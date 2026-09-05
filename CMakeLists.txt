@@ -241,6 +241,10 @@ if(ADAYO_BUILD_TESTS)
     if(ADAYO_WITH_SHERPA_ONNX AND ADAYO_WITH_JSON_CONFIG)
         add_executable(adayo_p4_tts_tests tests/p4_tts_tests.cpp)
         target_link_libraries(adayo_p4_tts_tests PRIVATE adayo_core adayo_persistence adayo_sherpa_adapter)
+        if(ADAYO_WITH_MINIAUDIO)
+            target_link_libraries(adayo_p4_tts_tests PRIVATE adayo_audio_adapter)
+            target_include_directories(adayo_p4_tts_tests PRIVATE ${MINIAUDIO_INCLUDE_DIRS})
+        endif()
         target_compile_definitions(adayo_p4_tts_tests PRIVATE
             ADAYO_MODELS_DIR="${ADAYO_TEST_MODELS_ROOT}")
         add_custom_command(TARGET adayo_p4_tts_tests POST_BUILD

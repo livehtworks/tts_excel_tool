@@ -51,7 +51,11 @@ function Copy-FileRequired([string]$Source, [string]$DestinationDir) {
         throw "Missing required file: $Source"
     }
     New-Item -ItemType Directory -Force -Path $DestinationDir | Out-Null
-    Copy-Item -LiteralPath $Source -Destination (Join-Path $DestinationDir (Split-Path $Source -Leaf)) -Force
+    $before=(Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash
+    $target=Join-Path $DestinationDir (Split-Path $Source -Leaf)
+    Copy-Item -LiteralPath $Source -Destination $target -Force
+    if ($before -ne (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -or
+        $before -ne (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash) { throw "File copy hash mismatch: $Source" }
 }
 
 function Copy-TreeRequired([string]$SourceDir, [string]$DestinationDir) {
@@ -237,6 +241,20 @@ $finalPrefix = $finalPackageDir.TrimEnd('\') + '\'
 foreach ($sourcePath in @((Resolve-RepoPath '.'),$buildPath,$modelSourcePath,(Resolve-RepoPath 'backup'))) {
     if ($sourcePath -eq $finalPackageDir -or $sourcePath.StartsWith($finalPrefix,[StringComparison]::OrdinalIgnoreCase)) { throw 'Output contains protected input' }
 }
+foreach ($protected in @($buildPath,$modelSourcePath,(Resolve-RepoPath 'backup'))) {
+    if ($finalPackageDir.StartsWith($protected.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)) {
+        throw "Output is inside protected input: $protected"
+    }
+}
+$packageManifest = Get-Content -LiteralPath $packageManifestSource -Encoding UTF8 -Raw | ConvertFrom-Json
+if ($packageManifest.schema_version -ne 1) { throw "Unsupported model package manifest schema_version" }
+if (-not $packageManifest.models -or $packageManifest.models.Count -eq 0) { throw "Model package manifest has no models" }
+$modelIds=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($model in $packageManifest.models) {
+    $modelId=[string]$model.id
+    if ($modelId -notmatch '^[A-Za-z0-9_-]+$' -or -not $modelIds.Add($modelId)) { throw "Invalid or duplicate model id: $modelId" }
+    Test-SherpaModelDirectory (Join-Path (Join-Path $modelSourcePath 'sherpa') $modelId) $modelId
+}
 $zipFullPath = $null
 if ($Zip) {
     if ([string]::IsNullOrWhiteSpace($ZipPath)) { $ZipPath = Join-Path $outputRootPath ($PackageName + '.zip') }
@@ -269,10 +287,6 @@ $modelsDest = Join-Path $stagingPackageDir "model"
 New-Item -ItemType Directory -Force -Path $modelsDest | Out-Null
 Copy-FileRequired (Resolve-RepoPath "models/README.md") $modelsDest
 Copy-FileRequired $packageManifestSource $modelsDest
-$packageManifest = Get-Content -LiteralPath $packageManifestSource -Encoding UTF8 -Raw | ConvertFrom-Json
-if ($packageManifest.schema_version -ne 1) { throw "Unsupported model package manifest schema_version: $($packageManifest.schema_version)" }
-if (-not $packageManifest.models -or $packageManifest.models.Count -eq 0) { throw "Model package manifest has no models" }
-
 foreach ($model in $packageManifest.models) {
     $modelId = [string]$model.id
     if ([string]::IsNullOrWhiteSpace($modelId)) { throw "Model package manifest contains an entry without id" }
