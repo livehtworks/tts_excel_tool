@@ -185,7 +185,7 @@ function Get-Dependents([string]$Dumpbin, [string]$Binary) {
         Sort-Object -Unique
 }
 
-function Test-DependencyClosure([string]$PackageDir) {
+function Test-DependencyClosure([string]$PackageDir, [string]$VcRuntimeDirectory) {
     $dumpbin = Find-Dumpbin
     $systemDlls = @(
         "advapi32.dll","bcrypt.dll","cfgmgr32.dll","comctl32.dll","comdlg32.dll","crypt32.dll","dwmapi.dll",
@@ -213,6 +213,13 @@ function Test-DependencyClosure([string]$PackageDir) {
         foreach ($dep in Get-Dependents $dumpbin $binary) {
             if ($allow.ContainsKey($dep)) { continue }
             if (Test-SystemApiSet $dep) { continue }
+            if (-not $known.ContainsKey($dep) -and $VcRuntimeDirectory) {
+                $runtimeDependency=Join-Path $VcRuntimeDirectory $dep
+                if (Test-Path -LiteralPath $runtimeDependency -PathType Leaf) {
+                    Copy-FileRequired $runtimeDependency $PackageDir
+                    $known[$dep]=Join-Path $PackageDir $dep
+                }
+            }
             if (-not $known.ContainsKey($dep)) {
                 throw "Unresolved non-system DLL dependency '$dep' required by $binary"
             }
@@ -335,7 +342,7 @@ foreach ($docName in @("PROJECT_STATUS.md", "EXECUTION_NOTES.md", "dependency-lo
 }
 Copy-FileRequired (Resolve-RepoPath "README.md") $stagingPackageDir
 
-Test-DependencyClosure $stagingPackageDir
+Test-DependencyClosure $stagingPackageDir $vcRuntimeDir
 
 $manifestPath = Join-Path $stagingPackageDir "PACKAGE_MANIFEST.txt"
 $packagePrefix = ([System.IO.Path]::GetFullPath($stagingPackageDir)).TrimEnd('\') + '\'
