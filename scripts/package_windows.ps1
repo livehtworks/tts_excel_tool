@@ -1,6 +1,6 @@
 param(
     [string]$BuildDir = "build/windows-release",
-    [string]$OutputRoot = "dist",
+    [string]$OutputRoot = "",
     [string]$PackageName = "AdayoCorpusTool",
     [string]$ModelSourceRoot = "dist/AdayoCorpusTool/model",
     [string]$ZipPath = "",
@@ -8,6 +8,34 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Assert-NoReparse([string]$PathValue) {
+    $current = [IO.Path]::GetFullPath($PathValue)
+    while ($current) {
+        if (Test-Path -LiteralPath $current) {
+            if ((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Reparse points are not permitted in package paths: $current"
+            }
+        }
+        $current = [IO.Path]::GetDirectoryName($current)
+    }
+}
+
+function Get-TreeDigest([string]$Root) {
+    Assert-NoReparse $Root
+    $prefix = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    $pending = [Collections.Generic.Queue[string]]::new()
+    $pending.Enqueue($Root)
+    $records = @()
+    while ($pending.Count) {
+        foreach ($item in Get-ChildItem -LiteralPath $pending.Dequeue() -Force) {
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Reparse entry rejected: $($item.FullName)" }
+            if ($item.PSIsContainer) { $pending.Enqueue($item.FullName) }
+            else { $records += "$($item.FullName.Substring($prefix.Length))|$($item.Length)|$((Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash)" }
+        }
+    }
+    return @($records | Sort-Object)
+}
 
 function Resolve-RepoPath([string]$PathValue) {
     if ([System.IO.Path]::IsPathRooted($PathValue)) {
@@ -17,6 +45,8 @@ function Resolve-RepoPath([string]$PathValue) {
 }
 
 function Copy-FileRequired([string]$Source, [string]$DestinationDir) {
+    Assert-NoReparse $Source
+    Assert-NoReparse $DestinationDir
     if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
         throw "Missing required file: $Source"
     }
@@ -28,8 +58,17 @@ function Copy-TreeRequired([string]$SourceDir, [string]$DestinationDir) {
     if (-not (Test-Path -LiteralPath $SourceDir -PathType Container)) {
         throw "Missing required directory: $SourceDir"
     }
+    $before = @(Get-TreeDigest $SourceDir)
+    Assert-NoReparse $DestinationDir
     New-Item -ItemType Directory -Force -Path $DestinationDir | Out-Null
-    Copy-Item -LiteralPath (Join-Path $SourceDir "*") -Destination $DestinationDir -Recurse -Force
+    foreach ($item in Get-ChildItem -LiteralPath $SourceDir -Force) {
+        Copy-Item -LiteralPath $item.FullName -Destination $DestinationDir -Recurse -Force
+    }
+    $after = @(Get-TreeDigest $DestinationDir)
+    $sourceAfter = @(Get-TreeDigest $SourceDir)
+    if (($before -join "`n") -cne ($after -join "`n") -or ($before -join "`n") -cne ($sourceAfter -join "`n")) {
+        throw "Source/destination tree hash mismatch: $SourceDir"
+    }
 }
 
 function Assert-ContainedRelativePath([string]$Root, [string]$Value, [string]$Label, [string]$ModelId, [switch]$Directory) {
@@ -97,6 +136,7 @@ function Find-VcRuntimeDir {
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
     if (Test-Path -LiteralPath $vswhere -PathType Leaf) {
         $install = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        if ($LASTEXITCODE -ne 0) { throw "vswhere failed: $LASTEXITCODE" }
         if ($install) {
             $redist = Join-Path $install "VC\Redist\MSVC"
             if (Test-Path -LiteralPath $redist -PathType Container) {
@@ -118,6 +158,7 @@ function Find-Dumpbin {
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
     if (Test-Path -LiteralPath $vswhere -PathType Leaf) {
         $install = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        if ($LASTEXITCODE -ne 0) { throw "vswhere failed: $LASTEXITCODE" }
         if ($install) {
             $candidate = Get-ChildItem -LiteralPath (Join-Path $install "VC\Tools\MSVC") -Recurse -Filter dumpbin.exe -File |
                 Where-Object { $_.FullName -like "*Hostx64*x64*" } |
@@ -131,6 +172,9 @@ function Find-Dumpbin {
 
 function Get-Dependents([string]$Dumpbin, [string]$Binary) {
     $lines = & $Dumpbin /dependents $Binary 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $lines -or -not ($lines -match 'Dump of file')) {
+        throw "dumpbin failed or returned invalid output for $Binary (exit $LASTEXITCODE)"
+    }
     $lines |
         Where-Object { $_ -match '^\s+[A-Za-z0-9_.+-]+\.dll\s*$' } |
         ForEach-Object { $_.Trim().ToLowerInvariant() } |
@@ -172,6 +216,11 @@ function Test-DependencyClosure([string]$PackageDir) {
     }
 }
 
+$sourceCommit = & git -C (Resolve-RepoPath '.') rev-parse HEAD
+if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') { throw 'Cannot identify source commit' }
+if ($PackageName -notmatch '^[A-Za-z0-9_-]+$') { throw 'Invalid PackageName' }
+$runId = [Guid]::NewGuid().ToString('N')
+if ([string]::IsNullOrWhiteSpace($OutputRoot)) { $OutputRoot = "dist/review-$($sourceCommit.Substring(0,7))-$runId" }
 $buildPath = Resolve-RepoPath $BuildDir
 $outputRootPath = Resolve-RepoPath $OutputRoot
 $modelSourcePath = Resolve-RepoPath $ModelSourceRoot
@@ -179,11 +228,23 @@ $packageManifestSource = Resolve-RepoPath "models/package-manifest.json"
 if (-not (Test-Path -LiteralPath $buildPath -PathType Container)) { throw "Build directory not found: $buildPath" }
 if (-not (Test-Path -LiteralPath $modelSourcePath -PathType Container)) { throw "ModelSourceRoot not found: $modelSourcePath" }
 
-$buildId = Get-Date -Format "yyyyMMdd-HHmmss"
-$stagingRoot = Join-Path $outputRootPath ".staging\$PackageName-$buildId"
+$stagingRoot = Join-Path $outputRootPath ".staging-$runId"
 $stagingPackageDir = Join-Path $stagingRoot $PackageName
 $finalPackageDir = Join-Path $outputRootPath $PackageName
-if (Test-Path -LiteralPath $stagingRoot) { Remove-Item -LiteralPath $stagingRoot -Recurse -Force }
+foreach ($path in @($buildPath,$outputRootPath,$modelSourcePath,$stagingRoot,$finalPackageDir)) { Assert-NoReparse $path }
+if (Test-Path -LiteralPath $finalPackageDir) { throw "Create-only target already exists: $finalPackageDir" }
+$finalPrefix = $finalPackageDir.TrimEnd('\') + '\'
+foreach ($sourcePath in @((Resolve-RepoPath '.'),$buildPath,$modelSourcePath,(Resolve-RepoPath 'backup'))) {
+    if ($sourcePath -eq $finalPackageDir -or $sourcePath.StartsWith($finalPrefix,[StringComparison]::OrdinalIgnoreCase)) { throw 'Output contains protected input' }
+}
+$zipFullPath = $null
+if ($Zip) {
+    if ([string]::IsNullOrWhiteSpace($ZipPath)) { $ZipPath = Join-Path $outputRootPath ($PackageName + '.zip') }
+    $zipFullPath = Resolve-RepoPath $ZipPath
+    Assert-NoReparse $zipFullPath
+    if (Test-Path -LiteralPath $zipFullPath) { throw "Create-only ZIP already exists: $zipFullPath" }
+}
+if (Test-Path -LiteralPath $stagingRoot) { throw 'Staging collision' }
 New-Item -ItemType Directory -Force -Path $stagingPackageDir | Out-Null
 
 Copy-FileRequired (Join-Path $buildPath "AdayoCorpusTool.exe") $stagingPackageDir
@@ -245,26 +306,18 @@ $files = Get-ChildItem -LiteralPath $stagingPackageDir -Recurse -File |
 Set-Content -LiteralPath $manifestPath -Encoding UTF8 -Value @(
     "Package: $PackageName",
     "Created: $(Get-Date -Format o)",
-    "Source commit: $(git -C (Resolve-RepoPath '.') rev-parse --short HEAD)",
+    "Source commit: $sourceCommit",
     "ModelSourceRoot: $modelSourcePath",
     "",
     "Files:",
     $files
 )
 
-if (Test-Path -LiteralPath $finalPackageDir) {
-    Remove-Item -LiteralPath $finalPackageDir -Recurse -Force
-}
-Move-Item -LiteralPath $stagingPackageDir -Destination $finalPackageDir
-Remove-Item -LiteralPath $stagingRoot -Recurse -Force
+Assert-NoReparse $finalPackageDir
+[IO.Directory]::Move($stagingPackageDir, $finalPackageDir)
+[IO.Directory]::Delete($stagingRoot, $false)
 
-$zipFullPath = $null
 if ($Zip) {
-    if ([string]::IsNullOrWhiteSpace($ZipPath)) {
-        $ZipPath = Join-Path $outputRootPath ($PackageName + ".zip")
-    }
-    $zipFullPath = [System.IO.Path]::GetFullPath($ZipPath)
-    if (Test-Path -LiteralPath $zipFullPath) { Remove-Item -LiteralPath $zipFullPath -Force }
     Compress-Archive -LiteralPath $finalPackageDir -DestinationPath $zipFullPath -CompressionLevel Optimal
 }
 

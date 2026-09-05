@@ -76,6 +76,6 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 ## Packaging
 
 - Use `scripts/package_windows.ps1` after building the `windows-release` preset.
-- The release directory is fixed at `dist/AdayoCorpusTool` and is updated in place.
+- The September review uses create-only outputs under `dist/review-<HEAD>-<run_id>/AdayoCorpusTool`. Existing targets are rejected; the established runtime directory and its model/config/export/cache data are protected.
 - Packaging does not create a ZIP unless `-Zip` is passed; the user packages ZIPs manually during development.
-- Runtime model resources are validated in `dist/AdayoCorpusTool/model`. The packaging script does not download models and does not copy a separate model tree from workspace `models/`.
+- The canonical model source remains `dist/AdayoCorpusTool/model`. Isolated review packages copy only manifest-listed models with source/destination hash verification; the script does not download or change the source models.

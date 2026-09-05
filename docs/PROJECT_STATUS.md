@@ -1,6 +1,6 @@
 # Project Status
 
-Current phase: R8 full-source audit remediation in progress. R7 local acceptance is superseded by the R8 audit, and P9 target-machine acceptance remains revoked until every R8 hard gate and target-machine gate passes.
+Current phase: executing the 2026-09-06 review work package against baseline `9e93d1b`, in stages A-G. Earlier acceptance is not final acceptance of this work. Real workbook fixtures and detailed local evidence remain outside the public repository.
 
 ## Current Architecture
 
