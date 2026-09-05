@@ -57,13 +57,11 @@ public:
     bool WaitUntilIdle(std::chrono::milliseconds timeout) const;
 
 private:
-    void SetState(PlaybackState state);
-    void SetError(std::string error);
-    void RunSequence(PlaybackRequest request, std::uint64_t generation);
-    bool IsCanceled(std::uint64_t generation) const;
-    bool WaitWhilePaused(std::uint64_t generation);
-    void FinishCanceledIfCurrentStop(std::uint64_t generation);
-    bool WaitInterval(std::chrono::milliseconds interval, std::uint64_t generation);
+    void RunSequence(PlaybackRequest request, const std::shared_ptr<AudioPlaybackContext>& context);
+    bool SetRequestState(const std::shared_ptr<AudioPlaybackContext>& context, PlaybackState state);
+    bool WaitReady(const std::shared_ptr<AudioPlaybackContext>& context);
+    void Finish(const std::shared_ptr<AudioPlaybackContext>& context, std::string error = {});
+    bool WaitInterval(std::chrono::milliseconds interval, const std::shared_ptr<AudioPlaybackContext>& context);
 
     TtsService& tts_;
     IAudioPlayer& player_;
@@ -77,7 +75,8 @@ private:
     std::size_t current_row_{};
     std::size_t current_column_{};
     std::atomic<std::uint64_t> generation_{0};
-    bool pause_requested_{false};
+    std::shared_ptr<AudioPlaybackContext> active_request_;
+    bool shutdown_{false};
 };
 
 } // namespace adayo

@@ -12,6 +12,7 @@ public:
     MiniaudioPlayer();
     ~MiniaudioPlayer() override;
     void Play(const AudioBuffer& audio) override;
+    void Play(const AudioBuffer& audio, const std::shared_ptr<AudioPlaybackContext>& context) override;
     void Pause() override;
     void Resume() override;
     void Stop() override;

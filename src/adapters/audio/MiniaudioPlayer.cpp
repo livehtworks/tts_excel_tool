@@ -1,6 +1,8 @@
 #include "adapters/audio/MiniaudioPlayer.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cmath>
 #include <condition_variable>
 #include <mutex>
 #include <stdexcept>
@@ -29,6 +31,7 @@ struct MiniaudioPlayer::Impl {
     bool playing{false};
     bool paused{false};
     bool stop_requested{false};
+    std::atomic<std::shared_ptr<AudioPlaybackContext>> context;
 };
 
 #ifdef ADAYO_HAS_MINIAUDIO
@@ -36,24 +39,31 @@ namespace {
 void DataCallback(ma_device* device, void* output, const void*, ma_uint32 frame_count) {
     auto* impl = static_cast<MiniaudioPlayer::Impl*>(device->pUserData);
     auto* out = static_cast<float*>(output);
-    const auto channels = std::max<std::int32_t>(1, impl->channels);
+    const auto channels = static_cast<std::int32_t>(device->playback.channels);
     const auto requested = static_cast<std::size_t>(frame_count) * static_cast<std::size_t>(channels);
 
-    std::unique_lock lock(impl->mutex);
     std::fill(out, out + requested, 0.0f);
+    auto context = impl->context.load();
+    if (!context) return;
+    // The same request lock gates controls and the first non-silent callback.
+    std::unique_lock request_lock(context->mutex);
+    if (context->canceled || context->paused) return;
+    std::unique_lock lock(impl->mutex);
     if (impl->paused || impl->stop_requested || !impl->playing) {
         return;
     }
 
     const auto remaining = impl->samples.size() - impl->cursor;
-    const auto to_copy = (std::min)(requested, remaining);
-    std::copy_n(impl->samples.data() + impl->cursor, to_copy, out);
-    impl->cursor += to_copy;
-    if (impl->cursor >= impl->samples.size()) {
+    if (remaining == 0) {
         impl->playing = false;
         lock.unlock();
         impl->cv.notify_all();
+        return;
     }
+    const auto to_copy = (std::min)(requested, remaining);
+    std::copy_n(impl->samples.data() + impl->cursor, to_copy, out);
+    impl->cursor += to_copy;
+    // Wait for the next device period before stopping, so the final buffer can drain.
 }
 
 void UninitDevice(MiniaudioPlayer::Impl& impl) {
@@ -102,11 +112,17 @@ MiniaudioPlayer::~MiniaudioPlayer() {
 }
 
 void MiniaudioPlayer::Play(const AudioBuffer& audio) {
+    Play(audio, std::make_shared<AudioPlaybackContext>());
+}
+
+void MiniaudioPlayer::Play(const AudioBuffer& audio, const std::shared_ptr<AudioPlaybackContext>& context) {
 #ifdef ADAYO_HAS_MINIAUDIO
     if (audio.samples.empty()) {
         throw std::invalid_argument("AudioBuffer samples 不能为空");
     }
-    if (audio.sample_rate <= 0 || audio.channels <= 0) {
+    if (audio.sample_rate < 8000 || audio.sample_rate > 384000 || audio.channels <= 0 || audio.channels > 8 ||
+        audio.samples.size() % audio.channels != 0 ||
+        !std::all_of(audio.samples.begin(), audio.samples.end(), [](float v) { return std::isfinite(v); })) {
         throw std::invalid_argument("AudioBuffer sample_rate/channels 非法");
     }
 
@@ -116,12 +132,15 @@ void MiniaudioPlayer::Play(const AudioBuffer& audio) {
         EnsureDevice(*impl_, audio.sample_rate, audio.channels);
     }
     {
+        std::lock_guard request_lock(context->mutex);
+        if (context->canceled) return;
         std::lock_guard lock(impl_->mutex);
+        impl_->context.store(context);
         impl_->samples = audio.samples;
         impl_->cursor = 0;
         impl_->channels = audio.channels;
         impl_->playing = true;
-        impl_->paused = false;
+        impl_->paused = context->paused;
         impl_->stop_requested = false;
     }
 
@@ -147,6 +166,7 @@ void MiniaudioPlayer::Play(const AudioBuffer& audio) {
     }
 #else
     (void)audio;
+    (void)context;
     throw std::runtime_error("当前构建未启用 miniaudio");
 #endif
 }

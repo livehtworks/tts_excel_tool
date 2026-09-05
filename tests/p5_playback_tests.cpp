@@ -44,9 +44,9 @@ public:
         return audio;
     }
 
-    int synth_count{};
-    int load_count{};
-    int unload_count{};
+    std::atomic<int> synth_count{};
+    std::atomic<int> load_count{};
+    std::atomic<int> unload_count{};
     bool fail_load{false};
     std::vector<std::string> load_history;
     std::string last_text;
@@ -101,11 +101,11 @@ public:
 
     std::mutex mutex;
     std::condition_variable cv;
-    int play_count{};
-    int stop_count{};
-    int resume_count{};
-    bool playing{false};
-    bool paused{false};
+    std::atomic<int> play_count{};
+    std::atomic<int> stop_count{};
+    std::atomic<int> resume_count{};
+    std::atomic<bool> playing{false};
+    std::atomic<bool> paused{false};
 };
 
 PlaybackRequest MakePlaybackRequest(std::vector<PlaybackItem> items,
@@ -304,14 +304,89 @@ void TestStalePlaybackRequestDoesNotLoadOldModel() {
     FakePlayer player;
     PlaybackService playback(tts, player);
 
+    playback.Play(MakePlaybackRequest({{{"barrier", "en-US", 0, 1.0}, 0, 1}},
+        std::chrono::milliseconds{0}, 1.0, "barrier"));
+    REQUIRE(engine->WaitForSynthStart(std::chrono::seconds{2}));
     playback.Play(MakePlaybackRequest({{{"old", "en-US", 0, 1.0}, 1, 1}},
         std::chrono::milliseconds{0}, 1.0, "old"));
     playback.Play(MakePlaybackRequest({{{"new", "en-US", 0, 1.0}, 2, 1}},
         std::chrono::milliseconds{0}, 1.0, "new"));
     engine->ReleaseSynthesis();
     REQUIRE(playback.WaitUntilIdle(std::chrono::seconds{2}));
-    REQUIRE(engine->load_history.size() == 1);
-    REQUIRE(engine->load_history[0] == "new");
+    REQUIRE(engine->load_history.size() == 2);
+    REQUIRE(engine->load_history[0] == "barrier");
+    REQUIRE(engine->load_history[1] == "new");
+}
+
+void TestRepeatedStopDuringSynthesis() {
+    for (int count : {2, 10}) {
+        auto* engine = new FakeTtsEngine();
+        engine->block_synthesis = true;
+        TtsService tts;
+        tts.SetEngine(std::unique_ptr<ITtsEngine>(engine));
+        FakePlayer player;
+        PlaybackService playback(tts, player);
+        playback.Play(MakePlaybackRequest({{{"blocked", "en-US", 0, 1.0}, 1, 1}}));
+        REQUIRE(engine->WaitForSynthStart(std::chrono::seconds{2}));
+        for (int i = 0; i < count; ++i) playback.Stop();
+        engine->ReleaseSynthesis();
+        REQUIRE(playback.WaitUntilIdle(std::chrono::seconds{2}));
+        REQUIRE(playback.State() == PlaybackState::Idle);
+        REQUIRE(player.play_count == 0);
+    }
+}
+
+class HandoffPlayer final : public IAudioPlayer {
+public:
+    void Play(const AudioBuffer&) override { throw std::logic_error("Context required"); }
+    void Play(const AudioBuffer&, const std::shared_ptr<AudioPlaybackContext>& context) override {
+        {
+            std::unique_lock lock(mutex);
+            arrived = true; cv.notify_all();
+            cv.wait(lock, [&] { return released; });
+        }
+        std::unique_lock lock(context->mutex);
+        observed_pause = context->paused;
+        observed_cancel = context->canceled;
+        inspected = true; cv.notify_all();
+        context->cv.wait(lock, [&] { return context->canceled || !context->paused; });
+        if (!context->canceled) ++starts;
+    }
+    void Pause() override {}
+    void Resume() override {}
+    void Stop() override {}
+    void WaitArrival() {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds{2}, [&] { return arrived; }));
+    }
+    void Release() { std::lock_guard lock(mutex); released = true; cv.notify_all(); }
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool arrived{}, released{};
+    std::atomic<bool> inspected{}, observed_pause{}, observed_cancel{};
+    std::atomic<int> starts{};
+};
+
+void TestControlsAtDeviceHandoff() {
+    for (bool pause : {false, true}) {
+        TtsService tts;
+        tts.SetEngine(std::make_unique<FakeTtsEngine>());
+        HandoffPlayer player;
+        PlaybackService playback(tts, player);
+        playback.Play(MakePlaybackRequest({{{"handoff", "en-US", 0, 1.0}, 1, 1}}));
+        player.WaitArrival();
+        if (pause) playback.Pause(); else playback.Stop();
+        player.Release();
+        {
+            std::unique_lock lock(player.mutex);
+            REQUIRE(player.cv.wait_for(lock, std::chrono::seconds{2}, [&] { return player.inspected.load(); }));
+        }
+        REQUIRE(player.starts == 0);
+        if (pause) { REQUIRE(player.observed_pause); REQUIRE(playback.State() == PlaybackState::Paused); playback.Resume(); }
+        else REQUIRE(player.observed_cancel);
+        REQUIRE(playback.WaitUntilIdle(std::chrono::seconds{2}));
+        REQUIRE(player.starts == (pause ? 1 : 0));
+    }
 }
 
 void TestWorkerQueueDiscardPending() {
@@ -405,6 +480,8 @@ int main() {
         TestEngineMismatchRejectedAtExecutionLayer();
         TestLoadFailureClearsActiveModelId();
         TestStalePlaybackRequestDoesNotLoadOldModel();
+        TestRepeatedStopDuringSynthesis();
+        TestControlsAtDeviceHandoff();
         TestWorkerQueueDiscardPending();
         TestWorkerQueueStopIsIdempotentAndConstructionIsStable();
         TestWorkerQueueUnhandledTaskErrorDoesNotTerminateWorker();
