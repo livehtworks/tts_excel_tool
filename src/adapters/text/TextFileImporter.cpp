@@ -1,9 +1,15 @@
 #include "adapters/text/TextFileImporter.h"
 
 #include "core/unicode/Utf8.h"
+#include "platform/UnicodePath.h"
 
 #include <fstream>
 #include <stdexcept>
+
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 namespace adayo {
 namespace {
@@ -41,7 +47,104 @@ std::string DecodeUtf16(std::string_view bytes, bool little_endian) {
     return unicode::Encode(out);
 }
 
-std::string DecodeTextByBom(std::string_view content) {
+bool IsStrictUtf8(std::string_view utf8) {
+    std::size_t i = 0;
+    while (i < utf8.size()) {
+        const auto c0 = static_cast<unsigned char>(utf8[i]);
+        if (c0 < 0x80U) {
+            ++i;
+            continue;
+        }
+        int length = 0;
+        char32_t cp = 0;
+        char32_t min_cp = 0;
+        if ((c0 & 0xE0U) == 0xC0U) {
+            length = 2; cp = c0 & 0x1FU; min_cp = 0x80;
+        } else if ((c0 & 0xF0U) == 0xE0U) {
+            length = 3; cp = c0 & 0x0FU; min_cp = 0x800;
+        } else if ((c0 & 0xF8U) == 0xF0U) {
+            length = 4; cp = c0 & 0x07U; min_cp = 0x10000;
+        } else {
+            return false;
+        }
+        if (i + static_cast<std::size_t>(length) > utf8.size()) return false;
+        for (int k = 1; k < length; ++k) {
+            const auto cx = static_cast<unsigned char>(utf8[i + static_cast<std::size_t>(k)]);
+            if ((cx & 0xC0U) != 0x80U) return false;
+            cp = (cp << 6U) | (cx & 0x3FU);
+        }
+        if (cp < min_cp || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return false;
+        i += static_cast<std::size_t>(length);
+    }
+    return true;
+}
+
+std::string DecodeGb18030(std::string_view bytes) {
+#ifdef _WIN32
+    if (bytes.empty()) return {};
+    constexpr UINT kGb18030 = 54936;
+    const int wide_len = MultiByteToWideChar(
+        kGb18030,
+        MB_ERR_INVALID_CHARS,
+        bytes.data(),
+        static_cast<int>(bytes.size()),
+        nullptr,
+        0);
+    if (wide_len <= 0) {
+        throw std::runtime_error("文本既不是严格 UTF-8，也无法按 GB18030 解码");
+    }
+    std::wstring wide(static_cast<std::size_t>(wide_len), L'\0');
+    const int converted = MultiByteToWideChar(
+        kGb18030,
+        MB_ERR_INVALID_CHARS,
+        bytes.data(),
+        static_cast<int>(bytes.size()),
+        wide.data(),
+        wide_len);
+    if (converted != wide_len) {
+        throw std::runtime_error("GB18030 文本解码失败");
+    }
+    const int utf8_len = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        wide.data(),
+        wide_len,
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    if (utf8_len <= 0) {
+        throw std::runtime_error("GB18030 文本转换 UTF-8 失败");
+    }
+    std::string utf8(static_cast<std::size_t>(utf8_len), '\0');
+    const int encoded = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        wide.data(),
+        wide_len,
+        utf8.data(),
+        utf8_len,
+        nullptr,
+        nullptr);
+    if (encoded != utf8_len) {
+        throw std::runtime_error("GB18030 文本转换 UTF-8 失败");
+    }
+    return utf8;
+#else
+    (void)bytes;
+    throw std::runtime_error("当前平台不支持 GB18030 自动解码");
+#endif
+}
+
+std::string DecodeText(std::string_view content, TextEncoding encoding) {
+    if (encoding == TextEncoding::Utf8) {
+        if (!IsStrictUtf8(content)) throw std::runtime_error("文本不是合法 UTF-8");
+        return std::string(content);
+    }
+    if (encoding == TextEncoding::Utf16LE) return DecodeUtf16(content, true);
+    if (encoding == TextEncoding::Utf16BE) return DecodeUtf16(content, false);
+    if (encoding == TextEncoding::Gb18030) return DecodeGb18030(content);
+
     if (content.size() >= 3 &&
         static_cast<unsigned char>(content[0]) == 0xEF &&
         static_cast<unsigned char>(content[1]) == 0xBB &&
@@ -58,7 +161,8 @@ std::string DecodeTextByBom(std::string_view content) {
         static_cast<unsigned char>(content[1]) == 0xFF) {
         return DecodeUtf16(content.substr(2), false);
     }
-    return std::string(content);
+    if (IsStrictUtf8(content)) return std::string(content);
+    return DecodeGb18030(content);
 }
 
 void TrimLineBoundary(std::string& text) {
@@ -74,7 +178,7 @@ void TrimLineBoundary(std::string& text) {
 
 void AddRecord(std::vector<std::string>& records, std::string record, bool skip_empty) {
     TrimLineBoundary(record);
-    if (skip_empty && record.empty()) return;
+    if (skip_empty && unicode::Trim(unicode::Decode(record)).empty()) return;
     records.push_back(std::move(record));
 }
 } // namespace
@@ -82,14 +186,14 @@ void AddRecord(std::vector<std::string>& records, std::string record, bool skip_
 std::vector<std::string> TextFileImporter::ReadUtf8Records(const std::filesystem::path& path, const TextImportOptions& options) {
     std::ifstream input(path, std::ios::binary);
     if (!input) {
-        throw std::runtime_error("无法读取文本文件: " + path.string());
+        throw std::runtime_error("无法读取文本文件: " + PathToUtf8(path));
     }
     std::string content((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
     return SplitUtf8Records(content, options);
 }
 
 std::vector<std::string> TextFileImporter::SplitUtf8Records(std::string_view content, const TextImportOptions& options) {
-    const std::string text = DecodeTextByBom(content);
+    const std::string text = DecodeText(content, options.encoding);
     std::vector<std::string> records;
     if (options.delimiter.empty()) {
         std::size_t begin = 0;

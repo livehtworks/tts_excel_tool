@@ -6,7 +6,9 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <exception>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 
 using namespace adayo;
@@ -16,8 +18,13 @@ class FakeTtsEngine final : public ITtsEngine {
 public:
     std::string Id() const override { return "fake"; }
     bool IsLoaded() const noexcept override { return loaded_; }
-    void Load(const TtsModelConfig&) override { loaded_ = true; }
-    void Unload() noexcept override { loaded_ = false; }
+    void Load(const TtsModelConfig& config) override {
+        ++load_count;
+        load_history.push_back(config.model_path);
+        if (fail_load) throw std::runtime_error("load failed");
+        loaded_ = true;
+    }
+    void Unload() noexcept override { loaded_ = false; ++unload_count; }
     AudioBuffer Synthesize(const TtsRequest& request) override {
         {
             std::unique_lock lock(mutex);
@@ -38,6 +45,10 @@ public:
     }
 
     int synth_count{};
+    int load_count{};
+    int unload_count{};
+    bool fail_load{false};
+    std::vector<std::string> load_history;
     std::string last_text;
     bool block_synthesis{false};
     bool release_synthesis{false};
@@ -97,19 +108,32 @@ public:
     bool paused{false};
 };
 
+PlaybackRequest MakePlaybackRequest(std::vector<PlaybackItem> items,
+    std::chrono::milliseconds interval = std::chrono::milliseconds{0},
+    double speed = 1.0,
+    std::string model_id = "fake-model") {
+    PlaybackRequest request;
+    request.model_id = std::move(model_id);
+    request.model_config.engine_id = "fake";
+    request.model_config.model_path = request.model_id;
+    request.items = std::move(items);
+    request.interval = interval;
+    request.speed = speed;
+    return request;
+}
+
 void TestSequenceSkipsEmptyAndReturnsIdle() {
     auto* engine = new FakeTtsEngine();
     TtsService tts;
     tts.SetEngine(std::unique_ptr<ITtsEngine>(engine));
-    tts.LoadModel({});
     FakePlayer player;
     PlaybackService playback(tts, player);
 
-    playback.PlaySequence({
+    playback.Play(MakePlaybackRequest({
         {{"first", "en-US", 0, 1.0}, 10, 2},
         {{"", "en-US", 0, 1.0}, 11, 2},
         {{"third", "en-US", 0, 1.0}, 12, 2},
-    }, std::chrono::milliseconds{1}, 1.0);
+    }, std::chrono::milliseconds{1}, 1.0));
 
     REQUIRE(playback.WaitUntilIdle(std::chrono::seconds{2}));
     REQUIRE(playback.State() == PlaybackState::Idle);
@@ -122,11 +146,10 @@ void TestPauseResumeAndStopDoNotLeaveStaleState() {
     auto* engine = new FakeTtsEngine();
     TtsService tts;
     tts.SetEngine(std::unique_ptr<ITtsEngine>(engine));
-    tts.LoadModel({});
     FakePlayer player;
     PlaybackService playback(tts, player);
 
-    playback.PlaySequence({{{"first", "en-US", 0, 1.0}, 1, 1}}, std::chrono::milliseconds{0}, 1.0);
+    playback.Play(MakePlaybackRequest({{{"first", "en-US", 0, 1.0}, 1, 1}}));
     REQUIRE(player.WaitForPlayCount(1, std::chrono::seconds{2}));
     playback.Stop();
     REQUIRE(playback.WaitUntilIdle(std::chrono::seconds{2}));
@@ -139,11 +162,10 @@ void TestPauseDuringGeneratingWaitsBeforePlaying() {
     engine->block_synthesis = true;
     TtsService tts;
     tts.SetEngine(std::unique_ptr<ITtsEngine>(engine));
-    tts.LoadModel({});
     FakePlayer player;
     PlaybackService playback(tts, player);
 
-    playback.PlaySequence({{{"slow", "en-US", 0, 1.0}, 7, 3}}, std::chrono::milliseconds{0}, 1.0);
+    playback.Play(MakePlaybackRequest({{{"slow", "en-US", 0, 1.0}, 7, 3}}));
     REQUIRE(engine->WaitForSynthStart(std::chrono::seconds{2}));
     playback.Pause();
     REQUIRE(playback.State() == PlaybackState::Paused);
@@ -159,14 +181,13 @@ void TestStopDuringIntervalExitsPromptly() {
     auto* engine = new FakeTtsEngine();
     TtsService tts;
     tts.SetEngine(std::unique_ptr<ITtsEngine>(engine));
-    tts.LoadModel({});
     FakePlayer player;
     PlaybackService playback(tts, player);
 
-    playback.PlaySequence({
+    playback.Play(MakePlaybackRequest({
         {{"first", "en-US", 0, 1.0}, 1, 1},
         {{"second", "en-US", 0, 1.0}, 2, 1},
-    }, std::chrono::seconds{3}, 1.0);
+    }, std::chrono::seconds{3}, 1.0));
     REQUIRE(player.WaitForPlayCount(1, std::chrono::seconds{2}));
     const auto start = std::chrono::steady_clock::now();
     playback.Stop();
@@ -181,18 +202,194 @@ void TestStopThenNewSequenceIgnoresOldWorkerState() {
     engine->block_synthesis = true;
     TtsService tts;
     tts.SetEngine(std::unique_ptr<ITtsEngine>(engine));
-    tts.LoadModel({});
     FakePlayer player;
     PlaybackService playback(tts, player);
 
-    playback.PlaySequence({{{"old", "en-US", 0, 1.0}, 1, 1}}, std::chrono::milliseconds{0}, 1.0);
+    playback.Play(MakePlaybackRequest({{{"old", "en-US", 0, 1.0}, 1, 1}}, std::chrono::milliseconds{0}, 1.0, "old"));
     REQUIRE(engine->WaitForSynthStart(std::chrono::seconds{2}));
     playback.Stop();
-    playback.PlaySequence({{{"new", "en-US", 0, 1.0}, 2, 1}}, std::chrono::milliseconds{0}, 1.0);
+    playback.Play(MakePlaybackRequest({{{"new", "en-US", 0, 1.0}, 2, 1}}, std::chrono::milliseconds{0}, 1.0, "new"));
     engine->ReleaseSynthesis();
     REQUIRE(playback.WaitUntilIdle(std::chrono::seconds{2}));
     REQUIRE(player.play_count == 1);
     REQUIRE(playback.CurrentRow() == 2);
+}
+
+void TestSameModelIsLoadedOnce() {
+    auto* engine = new FakeTtsEngine();
+    TtsService tts;
+    tts.SetEngine(std::unique_ptr<ITtsEngine>(engine));
+    FakePlayer player;
+    PlaybackService playback(tts, player);
+
+    PlaybackRequest request = MakePlaybackRequest({
+        {{"one", "en-US", 0, 1.0}, 1, 1},
+        {{"two", "en-US", 0, 1.0}, 2, 1},
+    }, std::chrono::milliseconds{0}, 1.0, "voice-a");
+    playback.Play(request);
+    REQUIRE(playback.WaitUntilIdle(std::chrono::seconds{2}));
+    playback.Play(std::move(request));
+    REQUIRE(playback.WaitUntilIdle(std::chrono::seconds{2}));
+    REQUIRE(engine->load_count == 1);
+    REQUIRE(engine->synth_count == 4);
+}
+
+void TestModelSwitchLoadsOnlyOnVoiceChange() {
+    auto* engine = new FakeTtsEngine();
+    TtsService tts;
+    tts.SetEngine(std::unique_ptr<ITtsEngine>(engine));
+    FakePlayer player;
+    PlaybackService playback(tts, player);
+
+    auto play_voice = [&](const char* id) {
+        PlaybackRequest request = MakePlaybackRequest({{{"text", "en-US", 0, 1.0}, 1, 1}},
+            std::chrono::milliseconds{0}, 1.0, id);
+        playback.Play(std::move(request));
+        REQUIRE(playback.WaitUntilIdle(std::chrono::seconds{2}));
+    };
+
+    play_voice("en");
+    play_voice("zh");
+    play_voice("en");
+    REQUIRE(engine->load_count == 3);
+    REQUIRE(engine->unload_count == 2);
+}
+
+void TestEngineMismatchRejectedAtExecutionLayer() {
+    auto* engine = new FakeTtsEngine();
+    TtsService tts;
+    tts.SetEngine(std::unique_ptr<ITtsEngine>(engine));
+    TtsModelConfig config;
+    config.engine_id = "other";
+    bool threw = false;
+    try {
+        tts.EnsureModelLoaded("bad", config);
+    } catch (const std::runtime_error& ex) {
+        threw = std::string(ex.what()).find("ENGINE_MISMATCH") != std::string::npos;
+    }
+    REQUIRE(threw);
+    REQUIRE(engine->load_count == 0);
+}
+
+void TestLoadFailureClearsActiveModelId() {
+    auto* engine = new FakeTtsEngine();
+    TtsService tts;
+    tts.SetEngine(std::unique_ptr<ITtsEngine>(engine));
+    TtsModelConfig ok;
+    ok.engine_id = "fake";
+    ok.model_path = "ok";
+    tts.EnsureModelLoaded("ok", ok);
+    REQUIRE(tts.ActiveModelId() == "ok");
+
+    TtsModelConfig bad;
+    bad.engine_id = "fake";
+    bad.model_path = "bad";
+    engine->fail_load = true;
+    bool threw = false;
+    try {
+        tts.EnsureModelLoaded("bad", bad);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    REQUIRE(threw);
+    REQUIRE(tts.ActiveModelId().empty());
+    REQUIRE(!engine->IsLoaded());
+}
+
+void TestStalePlaybackRequestDoesNotLoadOldModel() {
+    auto* engine = new FakeTtsEngine();
+    engine->block_synthesis = true;
+    TtsService tts;
+    tts.SetEngine(std::unique_ptr<ITtsEngine>(engine));
+    FakePlayer player;
+    PlaybackService playback(tts, player);
+
+    playback.Play(MakePlaybackRequest({{{"old", "en-US", 0, 1.0}, 1, 1}},
+        std::chrono::milliseconds{0}, 1.0, "old"));
+    playback.Play(MakePlaybackRequest({{{"new", "en-US", 0, 1.0}, 2, 1}},
+        std::chrono::milliseconds{0}, 1.0, "new"));
+    engine->ReleaseSynthesis();
+    REQUIRE(playback.WaitUntilIdle(std::chrono::seconds{2}));
+    REQUIRE(engine->load_history.size() == 1);
+    REQUIRE(engine->load_history[0] == "new");
+}
+
+void TestWorkerQueueDiscardPending() {
+    WorkerQueue queue;
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool first_started = false;
+    bool release_first = false;
+    int executed = 0;
+
+    queue.Submit([&](std::stop_token) {
+        {
+            std::lock_guard lock(mutex);
+            first_started = true;
+            ++executed;
+        }
+        cv.notify_all();
+        std::unique_lock lock(mutex);
+        cv.wait(lock, [&] { return release_first; });
+    });
+    queue.Submit([&](std::stop_token) { ++executed; });
+
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds{2}, [&] { return first_started; }));
+    }
+    std::jthread stopper([&] {
+        queue.Stop(StopMode::DiscardPending);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    {
+        std::lock_guard lock(mutex);
+        release_first = true;
+    }
+    cv.notify_all();
+    stopper.join();
+    REQUIRE(executed == 1);
+}
+
+void TestWorkerQueueStopIsIdempotentAndConstructionIsStable() {
+    for (int i = 0; i < 10000; ++i) {
+        WorkerQueue queue;
+        queue.Submit([](std::stop_token) {});
+        queue.Stop(i % 2 == 0 ? StopMode::Drain : StopMode::DiscardPending);
+        queue.Stop(StopMode::DiscardPending);
+        queue.Stop(StopMode::Drain);
+    }
+}
+
+void TestWorkerQueueUnhandledTaskErrorDoesNotTerminateWorker() {
+    std::mutex mutex;
+    std::condition_variable cv;
+    int errors = 0;
+    int after = 0;
+    WorkerQueue queue([&](std::exception_ptr error) {
+        try {
+            if (error) std::rethrow_exception(error);
+        } catch (const std::runtime_error& ex) {
+            REQUIRE(std::string(ex.what()) == "probe");
+            std::lock_guard lock(mutex);
+            ++errors;
+        }
+        cv.notify_all();
+    });
+
+    queue.Submit([](std::stop_token) { throw std::runtime_error("probe"); });
+    queue.Submit([&](std::stop_token) {
+        {
+            std::lock_guard lock(mutex);
+            ++after;
+        }
+        cv.notify_all();
+    });
+
+    std::unique_lock lock(mutex);
+    REQUIRE(cv.wait_for(lock, std::chrono::seconds{2}, [&] { return errors == 1 && after == 1; }));
+    lock.unlock();
+    queue.Stop();
 }
 } // namespace
 
@@ -203,5 +400,13 @@ int main() {
         TestPauseDuringGeneratingWaitsBeforePlaying();
         TestStopDuringIntervalExitsPromptly();
         TestStopThenNewSequenceIgnoresOldWorkerState();
+        TestSameModelIsLoadedOnce();
+        TestModelSwitchLoadsOnlyOnVoiceChange();
+        TestEngineMismatchRejectedAtExecutionLayer();
+        TestLoadFailureClearsActiveModelId();
+        TestStalePlaybackRequestDoesNotLoadOldModel();
+        TestWorkerQueueDiscardPending();
+        TestWorkerQueueStopIsIdempotentAndConstructionIsStable();
+        TestWorkerQueueUnhandledTaskErrorDoesNotTerminateWorker();
     });
 }

@@ -8,7 +8,7 @@ Status: P1 dependency baseline verified for current Windows machine.
 |---|---:|---|---|
 | Visual Studio | 2022 Community | Local install | Found |
 | MSVC | 19.44.35225.0 | VS2022 dev environment | Core/release build verified |
-| Ninja | `D:\programsoft\tools\ninja.exe` | Local install | Core/release build verified |
+| Ninja | external `ninja.exe` on `PATH` | Local install | Core/release build verified |
 | CMake | 4.4.2 | Tsinghua PyPI mirror, build-tool only | Available for vcpkg |
 | vcpkg registry | `a2b75031b909a2d6b051725c3909230c72d4bd4a` | `https://gitee.com/mirrors/vcpkg.git` | Cloned |
 | vcpkg tool | `2026-07-27-98d7cb0cf1f4686a3e43aa5672b6230c1d56bce8` | Bootstrapped by vcpkg | Available |
@@ -36,8 +36,8 @@ Archive SHA256 details are recorded in:
 Set:
 
 ```powershell
-$env:VCPKG_ROOT = "D:/path/to/vcpkg"
-$env:ADAYO_SHERPA_ONNX_ROOT = "D:/path/to/sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib"
+$env:VCPKG_ROOT = "<path-to-vcpkg>"
+$env:ADAYO_SHERPA_ONNX_ROOT = "<path-to-sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib>"
 ```
 
 ```cmd

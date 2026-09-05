@@ -1,13 +1,12 @@
 #pragma once
 
-#include "core/worker/WorkerQueue.h"
-#include "persistence/JsonConfigStore.h"
 #include "services/ModelRegistry.h"
 #include "services/WorkbookService.h"
 
-#include <memory>
 #include <optional>
+#include <vector>
 
+#include <wx/arrstr.h>
 #include <wx/panel.h>
 
 class wxButton;
@@ -18,13 +17,17 @@ class wxSpinCtrl;
 class wxStaticText;
 class wxTextCtrl;
 
-namespace adayo::ui {
+namespace adayo {
+class ApplicationRuntime;
+}
 
+namespace adayo::ui {
 class CorpusRunPanel;
 
 class CorpusMappingPanel final : public wxPanel {
 public:
-    CorpusMappingPanel(wxWindow* parent, CorpusRunPanel* run_panel);
+    CorpusMappingPanel(wxWindow* parent, ApplicationRuntime& runtime, CorpusRunPanel* run_panel);
+    void BeginShutdown();
 
 private:
     void OnBrowse(wxCommandEvent& event);
@@ -38,29 +41,29 @@ private:
     void OnSheetChanged(wxCommandEvent& event);
     void OnGridCellChanged(wxGridEvent& event);
 
+    bool CanUseUi() const;
     void AnalyzeCurrentSheet();
     void FillColumnGrid();
-    void LoadModelRegistry();
+    void RefreshModelRegistry();
     void SetBusy(bool busy, const wxString& message);
     void ConfigureRowEditors(int row);
     void RefreshRowModelStatus(int row);
+    wxArrayString LanguageChoices() const;
+    std::string GridFixedLanguage(int row) const;
+    std::string EffectiveLanguageForRow(int row) const;
     std::vector<std::string> ModelIdsForLanguage(const std::string& language_code) const;
     bool IsKnownModelForLanguage(const std::string& model_id, const std::string& language_code) const;
     std::vector<SelectedColumn> SelectedColumnsFromGrid() const;
-    std::string WorkbookPath() const;
+    std::filesystem::path WorkbookPath() const;
     std::string SheetName() const;
 
+    ApplicationRuntime& runtime_;
     CorpusRunPanel* run_panel_{};
-    std::unique_ptr<WorkbookService> workbook_service_;
-    JsonConfigStore config_store_;
-    AppConfig config_;
-    bool config_save_allowed_{true};
-    std::string initial_config_warning_;
     std::optional<WorkbookAnalysis> analysis_;
     std::vector<TtsModelEntry> model_entries_;
     std::vector<TtsModelDiagnostic> model_invalid_;
-    WorkerQueue worker_;
     bool busy_{false};
+    bool closing_{false};
 
     wxTextCtrl* workbook_path_{};
     wxChoice* sheet_choice_{};

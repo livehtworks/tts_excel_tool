@@ -19,6 +19,7 @@ struct MiniaudioPlayer::Impl {
     bool device_initialized{false};
     std::int32_t device_sample_rate{};
     std::int32_t device_channels{};
+    std::mutex device_mutex;
 #endif
     std::mutex mutex;
     std::condition_variable cv;
@@ -93,6 +94,7 @@ MiniaudioPlayer::MiniaudioPlayer() : impl_(std::make_unique<Impl>()) {}
 MiniaudioPlayer::~MiniaudioPlayer() {
     Stop();
 #ifdef ADAYO_HAS_MINIAUDIO
+    std::lock_guard device_lock(impl_->device_mutex);
     if (impl_->device_initialized) {
         UninitDevice(*impl_);
     }
@@ -101,13 +103,18 @@ MiniaudioPlayer::~MiniaudioPlayer() {
 
 void MiniaudioPlayer::Play(const AudioBuffer& audio) {
 #ifdef ADAYO_HAS_MINIAUDIO
-    if (audio.samples.empty()) return;
+    if (audio.samples.empty()) {
+        throw std::invalid_argument("AudioBuffer samples 不能为空");
+    }
     if (audio.sample_rate <= 0 || audio.channels <= 0) {
         throw std::invalid_argument("AudioBuffer sample_rate/channels 非法");
     }
 
     Stop();
-    EnsureDevice(*impl_, audio.sample_rate, audio.channels);
+    {
+        std::lock_guard device_lock(impl_->device_mutex);
+        EnsureDevice(*impl_, audio.sample_rate, audio.channels);
+    }
     {
         std::lock_guard lock(impl_->mutex);
         impl_->samples = audio.samples;
@@ -118,18 +125,26 @@ void MiniaudioPlayer::Play(const AudioBuffer& audio) {
         impl_->stop_requested = false;
     }
 
-    const auto start_result = ma_device_start(&impl_->device);
-    if (start_result != MA_SUCCESS) {
-        std::lock_guard lock(impl_->mutex);
-        impl_->playing = false;
-        impl_->stop_requested = true;
-        throw std::runtime_error("miniaudio device 启动失败");
+    {
+        std::lock_guard device_lock(impl_->device_mutex);
+        const auto start_result = ma_device_start(&impl_->device);
+        if (start_result != MA_SUCCESS) {
+            std::lock_guard lock(impl_->mutex);
+            impl_->playing = false;
+            impl_->stop_requested = true;
+            throw std::runtime_error("miniaudio device 启动失败");
+        }
     }
 
     std::unique_lock lock(impl_->mutex);
     impl_->cv.wait(lock, [&] { return !impl_->playing || impl_->stop_requested; });
     lock.unlock();
-    ma_device_stop(&impl_->device);
+    {
+        std::lock_guard device_lock(impl_->device_mutex);
+        if (impl_->device_initialized) {
+            ma_device_stop(&impl_->device);
+        }
+    }
 #else
     (void)audio;
     throw std::runtime_error("当前构建未启用 miniaudio");
@@ -155,6 +170,7 @@ void MiniaudioPlayer::Stop() {
     }
     impl_->cv.notify_all();
 #ifdef ADAYO_HAS_MINIAUDIO
+    std::lock_guard device_lock(impl_->device_mutex);
     if (impl_->device_initialized) {
         ma_device_stop(&impl_->device);
     }

@@ -1,6 +1,8 @@
 #include "ui/CorpusRunPanel.h"
 
 #include "adapters/excel/LibXlsxWriterExporter.h"
+#include "app/ApplicationRuntime.h"
+#include "ui/UiString.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -16,40 +18,29 @@
 
 namespace adayo::ui {
 namespace {
-wxString FromUtf8(const std::string& text) {
-    return wxString::FromUTF8(text);
-}
-
-std::string ToUtf8(const wxString& text) {
-    return text.ToUTF8().data() ? std::string(text.ToUTF8().data()) : std::string{};
-}
-
 wxString StateText(PlaybackState state) {
     switch (state) {
-        case PlaybackState::Idle: return "空闲";
-        case PlaybackState::Generating: return "生成中";
-        case PlaybackState::Playing: return "播放中";
-        case PlaybackState::Paused: return "已暂停";
-        case PlaybackState::Stopping: return "停止中";
-        case PlaybackState::Error: return "错误";
+        case PlaybackState::Idle: return WxUtf8("空闲");
+        case PlaybackState::Generating: return WxUtf8("生成中");
+        case PlaybackState::Playing: return WxUtf8("播放中");
+        case PlaybackState::Paused: return WxUtf8("已暂停");
+        case PlaybackState::Stopping: return WxUtf8("停止中");
+        case PlaybackState::Error: return WxUtf8("错误");
     }
-    return "未知";
+    return WxUtf8("未知");
 }
 } // namespace
 
-CorpusRunPanel::CorpusRunPanel(wxWindow* parent,
-    const std::vector<TtsModelEntry>* models,
-    TtsService* tts,
-    PlaybackService* playback)
+CorpusRunPanel::CorpusRunPanel(wxWindow* parent, ApplicationRuntime& runtime)
     : wxPanel(parent),
-      models_(models),
-      tts_(tts),
-      playback_(playback),
+      runtime_(runtime),
+      models_(&runtime.ModelScan().entries),
+      playback_(&runtime.Playback()),
       playback_timer_(this) {
     auto* root = new wxBoxSizer(wxVERTICAL);
     auto* top = new wxBoxSizer(wxHORIZONTAL);
-    status_ = new wxStaticText(this, wxID_ANY, "尚未生成运行视图");
-    export_button_ = new wxButton(this, wxID_ANY, "导出 Excel");
+    status_ = new wxStaticText(this, wxID_ANY, WxUtf8("尚未生成运行视图"));
+    export_button_ = new wxButton(this, wxID_ANY, WxUtf8("导出 Excel"));
     export_button_->Bind(wxEVT_BUTTON, &CorpusRunPanel::OnExport, this);
     top->Add(status_, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     top->Add(export_button_, 0);
@@ -61,10 +52,10 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent,
     end_row_ = new wxSpinCtrl(this, wxID_ANY);
     interval_ms_ = new wxSpinCtrl(this, wxID_ANY);
     speed_ = new wxSpinCtrlDouble(this, wxID_ANY);
-    play_button_ = new wxButton(this, wxID_ANY, "播放");
-    pause_button_ = new wxButton(this, wxID_ANY, "暂停");
-    resume_button_ = new wxButton(this, wxID_ANY, "继续");
-    stop_button_ = new wxButton(this, wxID_ANY, "停止");
+    play_button_ = new wxButton(this, wxID_ANY, WxUtf8("播放"));
+    pause_button_ = new wxButton(this, wxID_ANY, WxUtf8("暂停"));
+    resume_button_ = new wxButton(this, wxID_ANY, WxUtf8("继续"));
+    stop_button_ = new wxButton(this, wxID_ANY, WxUtf8("停止"));
 
     start_row_->SetRange(1, 1);
     end_row_->SetRange(1, 1);
@@ -73,18 +64,24 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent,
     speed_->SetRange(0.5, 2.0);
     speed_->SetIncrement(0.1);
     speed_->SetDigits(1);
-    speed_->SetValue(1.0);
+    speed_->SetValue(runtime_.ConfigSnapshot().speech_rate);
 
     play_button_->Bind(wxEVT_BUTTON, &CorpusRunPanel::OnPlay, this);
     pause_button_->Bind(wxEVT_BUTTON, &CorpusRunPanel::OnPause, this);
     resume_button_->Bind(wxEVT_BUTTON, &CorpusRunPanel::OnResume, this);
     stop_button_->Bind(wxEVT_BUTTON, &CorpusRunPanel::OnStop, this);
+    speed_->Bind(wxEVT_SPINCTRLDOUBLE, &CorpusRunPanel::OnPlaybackSettingsChanged, this);
     Bind(wxEVT_TIMER, &CorpusRunPanel::OnPlaybackTimer, this);
 
+    playback_bar->Add(new wxStaticText(this, wxID_ANY, WxUtf8("播放列")), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
     playback_bar->Add(play_column_choice_, 1, wxRIGHT, 6);
+    playback_bar->Add(new wxStaticText(this, wxID_ANY, WxUtf8("起始行")), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
     playback_bar->Add(start_row_, 0, wxRIGHT, 4);
+    playback_bar->Add(new wxStaticText(this, wxID_ANY, WxUtf8("结束行")), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
     playback_bar->Add(end_row_, 0, wxRIGHT, 4);
+    playback_bar->Add(new wxStaticText(this, wxID_ANY, WxUtf8("句间隔(ms)")), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
     playback_bar->Add(interval_ms_, 0, wxRIGHT, 4);
+    playback_bar->Add(new wxStaticText(this, wxID_ANY, WxUtf8("语速")), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
     playback_bar->Add(speed_, 0, wxRIGHT, 6);
     playback_bar->Add(play_button_, 0, wxRIGHT, 4);
     playback_bar->Add(pause_button_, 0, wxRIGHT, 4);
@@ -96,7 +93,7 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent,
     grid_->CreateGrid(0, 0);
     grid_->EnableEditing(true);
     grid_->Bind(wxEVT_GRID_CELL_CHANGED, &CorpusRunPanel::OnCellChanged, this);
-    grid_->Bind(wxEVT_GRID_CELL_LEFT_DCLICK, &CorpusRunPanel::OnCellDClick, this);
+    grid_->Bind(wxEVT_GRID_CELL_LEFT_CLICK, &CorpusRunPanel::OnCellClick, this);
     root->Add(grid_, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
     SetSizer(root);
     UpdatePlaybackUi();
@@ -104,35 +101,51 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent,
 
 void CorpusRunPanel::OnExport(wxCommandEvent&) {
     if (!session_ || export_busy_) return;
-    wxFileDialog dialog(this, "导出运行视图", "", "runtime.xlsx", "Excel workbook (*.xlsx)|*.xlsx", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+    wxFileDialog dialog(this, WxUtf8("导出运行视图"), wxString{}, WxUtf8("runtime.xlsx"), WxUtf8("Excel workbook (*.xlsx)|*.xlsx"), wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
     if (dialog.ShowModal() == wxID_OK) {
         const auto view = session_->view;
-        const auto output = std::filesystem::path(dialog.GetPath().ToStdWstring());
+        const auto output = PathFromWx(dialog.GetPath());
         export_busy_ = true;
         export_button_->Enable(false);
-        status_->SetLabel("运行视图导出中");
-        worker_.Submit([this, view, output] {
+        status_->SetLabel(WxUtf8("运行视图导出中"));
+        runtime_.BackgroundJobs().Submit([this, view, output](std::stop_token token) {
             try {
-            LibXlsxWriterExporter exporter;
+                if (token.stop_requested()) return;
+                LibXlsxWriterExporter exporter;
                 exporter.ExportRuntimeView(view, output);
+                if (token.stop_requested()) return;
                 CallAfter([this] {
+                    if (closing_ || IsBeingDeleted()) return;
                     export_busy_ = false;
                     export_button_->Enable(true);
-                    status_->SetLabel("运行视图已导出");
+                    status_->SetLabel(WxUtf8("运行视图已导出"));
                 });
             } catch (const std::exception& ex) {
                 const std::string error = ex.what();
+                runtime_.Logger().Error("export", error);
                 CallAfter([this, error] {
+                    if (closing_ || IsBeingDeleted()) return;
                     export_busy_ = false;
                     export_button_->Enable(true);
-                    status_->SetLabel(FromUtf8(error));
+                    status_->SetLabel(WxUtf8(error));
                 });
             }
         });
     }
 }
 
+void CorpusRunPanel::BeginShutdown() {
+    if (closing_) return;
+    closing_ = true;
+    playback_timer_.Stop();
+    if (playback_) playback_->Stop();
+    Disable();
+}
+
 void CorpusRunPanel::SetSession(CorpusSession session) {
+    ++playback_ui_generation_;
+    if (playback_) playback_->Stop();
+    playback_timer_.Stop();
     session_ = std::move(session);
     RefreshGrid();
 }
@@ -147,7 +160,7 @@ void CorpusRunPanel::RefreshGrid() {
     }
 
     if (!session_) {
-        status_->SetLabel("尚未生成运行视图");
+        status_->SetLabel(WxUtf8("尚未生成运行视图"));
         PopulatePlayColumns();
         grid_->Thaw();
         return;
@@ -157,7 +170,7 @@ void CorpusRunPanel::RefreshGrid() {
     if (!view.headers.empty()) {
         grid_->AppendCols(static_cast<int>(view.headers.size()));
         for (std::size_t c = 0; c < view.headers.size(); ++c) {
-            grid_->SetColLabelValue(static_cast<int>(c), FromUtf8(view.headers[c]));
+            grid_->SetColLabelValue(static_cast<int>(c), WxUtf8(view.headers[c]));
         }
     }
     if (!view.rows.empty()) {
@@ -165,7 +178,7 @@ void CorpusRunPanel::RefreshGrid() {
         for (std::size_t r = 0; r < view.rows.size(); ++r) {
             for (std::size_t c = 0; c < view.headers.size(); ++c) {
                 const std::string value = c < view.rows[r].size() ? view.rows[r][c] : std::string{};
-                grid_->SetCellValue(static_cast<int>(r), static_cast<int>(c), FromUtf8(value));
+                grid_->SetCellValue(static_cast<int>(r), static_cast<int>(c), WxUtf8(value));
                 bool read_only = c < view.columns.size() &&
                     (view.columns[c].role == ColumnRole::Index || view.columns[c].role == ColumnRole::Result);
                 if (c < view.columns.size() && view.columns[c].role == ColumnRole::Play && r < view.row_meta.size()) {
@@ -178,11 +191,21 @@ void CorpusRunPanel::RefreshGrid() {
             }
         }
     }
-    grid_->AutoSizeColumns(false);
+    for (int c = 0; c < grid_->GetNumberCols(); ++c) {
+        grid_->SetColSize(c, c == 0 ? 60 : 180);
+    }
     PopulatePlayColumns();
-    status_->SetLabel(wxString::Format("运行视图：%d 行，%d 列", grid_->GetNumberRows(), grid_->GetNumberCols()));
+    status_->SetLabel(WxUtf8("运行视图：") + wxString::Format("%d", grid_->GetNumberRows()) + WxUtf8(" 行，") + wxString::Format("%d", grid_->GetNumberCols()) + WxUtf8(" 列"));
     grid_->Thaw();
     UpdatePlaybackUi();
+}
+
+bool CorpusRunPanel::HasPlayableSegment(std::size_t row, std::size_t view_column) const {
+    if (!session_ || row >= session_->view.row_meta.size() || view_column >= session_->view.columns.size()) return false;
+    const auto& column = session_->view.columns[view_column];
+    if (column.role != ColumnRole::Play) return false;
+    const auto segment = session_->view.row_meta[row].segment_indexes.find(column.source_index);
+    return segment != session_->view.row_meta[row].segment_indexes.end() && segment->second.has_value();
 }
 
 void CorpusRunPanel::PopulatePlayColumns() {
@@ -197,10 +220,10 @@ void CorpusRunPanel::PopulatePlayColumns() {
     for (std::size_t c = 0; c < view.columns.size(); ++c) {
         if (view.columns[c].role != ColumnRole::Play) continue;
         play_view_columns_.push_back(c);
-        wxString label = FromUtf8(view.columns[c].excel_column);
+        wxString label = WxUtf8(view.columns[c].excel_column);
         if (!view.columns[c].header.empty()) {
             label += " ";
-            label += FromUtf8(view.columns[c].header);
+            label += WxUtf8(view.columns[c].header);
         }
         play_column_choice_->Append(label);
     }
@@ -216,7 +239,7 @@ void CorpusRunPanel::PopulatePlayColumns() {
 }
 
 const TtsModelEntry& CorpusRunPanel::ResolveModel(const SelectedColumn& column) const {
-    if (!models_ || !tts_ || !playback_) {
+    if (!models_ || !playback_) {
         throw std::runtime_error("播放服务未初始化");
     }
     if (column.tts_model_id.empty()) {
@@ -248,20 +271,22 @@ void CorpusRunPanel::StartPlayback(std::size_t first_row, std::size_t last_row, 
     }
 
     const auto& model = ResolveModel(column);
-    playback_->Stop();
-    tts_->LoadModel(model.config);
 
-    std::vector<PlaybackItem> items;
-    items.reserve(last_row - first_row + 1);
+    PlaybackRequest request;
+    request.model_id = model.id;
+    request.model_config = model.config;
+    request.interval = std::chrono::milliseconds(interval_ms_->GetValue());
+    request.speed = speed_->GetValue();
+    request.items.reserve(last_row - first_row + 1);
     for (std::size_t r = first_row; r <= last_row; ++r) {
         const auto text = view_column < session_->view.rows[r].size() ? session_->view.rows[r][view_column] : std::string{};
-        items.push_back(PlaybackItem{
+        request.items.push_back(PlaybackItem{
             TtsRequest{text, column.language_code, model.config.speaker_id, speed_->GetValue()},
             r,
             view_column,
         });
     }
-    playback_->PlaySequence(std::move(items), std::chrono::milliseconds(interval_ms_->GetValue()), speed_->GetValue());
+    playback_->Play(std::move(request));
     playback_timer_.Start(100);
     HighlightPlaybackCell(first_row, view_column);
     UpdatePlaybackUi();
@@ -282,11 +307,12 @@ void CorpusRunPanel::HighlightPlaybackCell(std::size_t row, std::size_t column) 
 
 void CorpusRunPanel::UpdatePlaybackUi() {
     const bool has_session = session_.has_value() && grid_->GetNumberRows() > 0 && !play_view_columns_.empty();
-    const bool has_playback = playback_ != nullptr && tts_ != nullptr && models_ != nullptr;
+    const bool has_playback = playback_ != nullptr && models_ != nullptr;
     const auto state = playback_ ? playback_->State() : PlaybackState::Idle;
     const bool busy = state == PlaybackState::Generating || state == PlaybackState::Playing ||
         state == PlaybackState::Paused || state == PlaybackState::Stopping;
 
+    grid_->EnableEditing(!busy);
     play_button_->Enable(has_session && has_playback && !busy);
     pause_button_->Enable(has_playback && (state == PlaybackState::Generating || state == PlaybackState::Playing));
     resume_button_->Enable(has_playback && state == PlaybackState::Paused);
@@ -298,9 +324,9 @@ void CorpusRunPanel::UpdatePlaybackUi() {
     speed_->Enable(has_session && !busy);
 
     if (playback_ && state == PlaybackState::Error) {
-        status_->SetLabel(FromUtf8(playback_->LastError()));
+        status_->SetLabel(WxUtf8(playback_->LastError()));
     } else if (playback_ && busy) {
-        status_->SetLabel("播放状态：" + StateText(state));
+        status_->SetLabel(WxUtf8("播放状态：") + StateText(state));
     }
 }
 
@@ -318,7 +344,7 @@ void CorpusRunPanel::OnPlay(wxCommandEvent&) {
         if (first > last) std::swap(first, last);
         StartPlayback(first, last, view_column);
     } catch (const std::exception& ex) {
-        status_->SetLabel(FromUtf8(ex.what()));
+        status_->SetLabel(WxUtf8(ex.what()));
         UpdatePlaybackUi();
     }
 }
@@ -335,8 +361,21 @@ void CorpusRunPanel::OnResume(wxCommandEvent&) {
 
 void CorpusRunPanel::OnStop(wxCommandEvent&) {
     if (playback_) playback_->Stop();
-    playback_timer_.Stop();
+    playback_timer_.Start(100);
     UpdatePlaybackUi();
+}
+
+void CorpusRunPanel::OnPlaybackSettingsChanged(wxCommandEvent& event) {
+    try {
+        runtime_.UpdateConfig([&](AppConfig& config) {
+            config.speech_rate = speed_->GetValue();
+        });
+        runtime_.SaveConfig();
+    } catch (const std::exception& ex) {
+        runtime_.Logger().Error("config", ex.what());
+        status_->SetLabel(WxUtf8(ex.what()));
+    }
+    event.Skip();
 }
 
 void CorpusRunPanel::OnPlaybackTimer(wxTimerEvent&) {
@@ -356,28 +395,37 @@ void CorpusRunPanel::OnCellChanged(wxGridEvent& event) {
         return;
     }
     try {
+        const auto state = playback_ ? playback_->State() : PlaybackState::Idle;
+        if (state == PlaybackState::Generating || state == PlaybackState::Playing ||
+            state == PlaybackState::Paused || state == PlaybackState::Stopping) {
+            status_->SetLabel(WxUtf8("播放中禁止编辑文本"));
+            return;
+        }
         const auto row = static_cast<std::size_t>(event.GetRow());
         const auto col = static_cast<std::size_t>(event.GetCol());
         const auto old_row_count = session_->view.rows.size();
         const auto old_col_count = session_->view.headers.size();
-        service_.UpdateDisplayCell(*session_, row, col, ToUtf8(grid_->GetCellValue(event.GetRow(), event.GetCol())));
-        if (session_->view.rows.size() != old_row_count || session_->view.headers.size() != old_col_count) {
+        service_.UpdateDisplayCell(*session_, row, col, Utf8FromWx(grid_->GetCellValue(event.GetRow(), event.GetCol())));
+        if (session_->view.rows.size() != old_row_count || session_->view.headers.size() != old_col_count ||
+            session_->view.columns[col].role == ColumnRole::Reference) {
             RefreshGrid();
         } else {
-            grid_->SetCellValue(event.GetRow(), event.GetCol(), FromUtf8(session_->view.rows[row][col]));
+            for (std::size_t c = 0; c < session_->view.rows[row].size(); ++c) {
+                grid_->SetCellValue(event.GetRow(), static_cast<int>(c), WxUtf8(session_->view.rows[row][c]));
+            }
         }
     } catch (const std::exception& ex) {
-        status_->SetLabel(FromUtf8(ex.what()));
+        status_->SetLabel(WxUtf8(ex.what()));
         if (session_ && event.GetRow() >= 0 && event.GetCol() >= 0 &&
             static_cast<std::size_t>(event.GetRow()) < session_->view.rows.size() &&
             static_cast<std::size_t>(event.GetCol()) < session_->view.rows[static_cast<std::size_t>(event.GetRow())].size()) {
             grid_->SetCellValue(event.GetRow(), event.GetCol(),
-                FromUtf8(session_->view.rows[static_cast<std::size_t>(event.GetRow())][static_cast<std::size_t>(event.GetCol())]));
+                WxUtf8(session_->view.rows[static_cast<std::size_t>(event.GetRow())][static_cast<std::size_t>(event.GetCol())]));
         }
     }
 }
 
-void CorpusRunPanel::OnCellDClick(wxGridEvent& event) {
+void CorpusRunPanel::OnCellClick(wxGridEvent& event) {
     if (!session_) {
         event.Skip();
         return;
@@ -387,15 +435,16 @@ void CorpusRunPanel::OnCellDClick(wxGridEvent& event) {
         const auto col = static_cast<std::size_t>(event.GetCol());
         if (col < session_->view.columns.size() && session_->view.columns[col].role == ColumnRole::Result) {
             service_.CycleResult(*session_, row, col);
-            grid_->SetCellValue(event.GetRow(), event.GetCol(), FromUtf8(session_->view.rows[row][col]));
+            grid_->SetCellValue(event.GetRow(), event.GetCol(), WxUtf8(session_->view.rows[row][col]));
             return;
         }
         if (col < session_->view.columns.size() && session_->view.columns[col].role == ColumnRole::Play) {
+            if (!HasPlayableSegment(row, col)) return;
             StartPlayback(row, row, col);
             return;
         }
     } catch (const std::exception& ex) {
-        status_->SetLabel(FromUtf8(ex.what()));
+        status_->SetLabel(WxUtf8(ex.what()));
         UpdatePlaybackUi();
     }
     event.Skip();

@@ -9,17 +9,23 @@
 
 namespace adayo {
 
+enum class StopMode {
+    Drain,
+    DiscardPending,
+};
+
 class WorkerQueue {
 public:
-    using Task = std::function<void()>;
+    using Task = std::function<void(std::stop_token)>;
+    using ErrorHandler = std::function<void(std::exception_ptr)>;
 
-    WorkerQueue();
+    explicit WorkerQueue(ErrorHandler on_unhandled_task_error = {});
     ~WorkerQueue();
     WorkerQueue(const WorkerQueue&) = delete;
     WorkerQueue& operator=(const WorkerQueue&) = delete;
 
     void Submit(Task task);
-    void Stop();
+    void Stop(StopMode mode = StopMode::Drain);
 
 private:
     void Run(std::stop_token stop_token);
@@ -28,7 +34,9 @@ private:
     std::condition_variable_any cv_;
     std::queue<Task> tasks_;
     std::jthread worker_;
+    ErrorHandler on_unhandled_task_error_;
     bool accepting_{true};
+    bool stopped_{false};
 };
 
 } // namespace adayo

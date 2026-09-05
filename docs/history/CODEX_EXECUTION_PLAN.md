@@ -1,3 +1,7 @@
+# SUPERSEDED_DO_NOT_EXECUTE
+
+Superseded by: `AdayoCorpusTool_R8_FULL_SOURCE_AUDIT_CLOSED_LOOP_REMEDIATION_20260819.md`
+
 # Codex 执行方案：Adayo 语料测试工具 C++ 重写
 
 > 输入工程：本 ZIP 根目录。旧 Python 工程仅作为业务行为证据，不允许逐行翻译或保留运行时。

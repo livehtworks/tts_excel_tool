@@ -1,5 +1,7 @@
 #include "persistence/JsonConfigStore.h"
 
+#include "platform/UnicodePath.h"
+
 #include <chrono>
 #include <fstream>
 #include <iomanip>
@@ -20,17 +22,12 @@ namespace adayo {
 using nlohmann::json;
 
 namespace {
-constexpr int kCurrentSchemaVersion = 2;
+constexpr int kCurrentSchemaVersion = 3;
 
 class FutureSchemaError final : public std::runtime_error {
 public:
     using std::runtime_error::runtime_error;
 };
-
-std::string PathUtf8(const std::filesystem::path& path) {
-    const auto u8 = path.u8string();
-    return {u8.begin(), u8.end()};
-}
 
 std::string Timestamp() {
     const auto now = std::chrono::system_clock::now();
@@ -71,7 +68,7 @@ void RejectUnsafeExistingTarget(const std::filesystem::path& path) {
     if (!std::filesystem::exists(path)) return;
     std::ifstream input(path, std::ios::binary);
     if (!input) {
-        throw std::runtime_error("无法读取现有配置文件，拒绝覆盖: " + PathUtf8(path));
+        throw std::runtime_error("无法读取现有配置文件，拒绝覆盖: " + PathToUtf8(path));
     }
     json document;
     try {
@@ -120,6 +117,19 @@ SuggestedColumnType SuggestedColumnTypeFromString(const std::string& value) {
     if (value == "result") return SuggestedColumnType::Result;
     return SuggestedColumnType::Unknown;
 }
+
+std::string ToString(LanguageSelectionMode mode) {
+    switch (mode) {
+        case LanguageSelectionMode::Auto: return "auto";
+        case LanguageSelectionMode::Fixed: return "fixed";
+    }
+    return "auto";
+}
+
+LanguageSelectionMode LanguageSelectionModeFromString(const std::string& value) {
+    if (value == "fixed") return LanguageSelectionMode::Fixed;
+    return LanguageSelectionMode::Auto;
+}
 } // namespace
 
 void to_json(json& j, const ColumnProfile& column) {
@@ -135,6 +145,7 @@ void to_json(json& j, const ColumnProfile& column) {
         {"role", ToString(column.role)},
         {"language_code", column.language_code},
         {"language_user_overridden", column.language_user_overridden},
+        {"language_selection_mode", ToString(column.language_selection_mode)},
         {"tts_engine_id", column.tts_engine_id},
         {"tts_model_id", column.tts_model_id},
     };
@@ -152,6 +163,11 @@ void from_json(const json& j, ColumnProfile& column) {
     column.role = ColumnRoleFromString(j.value("role", std::string{}));
     column.language_code = j.value("language_code", std::string{});
     column.language_user_overridden = j.value("language_user_overridden", false);
+    column.language_selection_mode = LanguageSelectionModeFromString(j.value("language_selection_mode", std::string{}));
+    if (column.language_user_overridden && !j.contains("language_selection_mode")) {
+        column.language_selection_mode = LanguageSelectionMode::Fixed;
+    }
+    column.language_user_overridden = column.language_selection_mode == LanguageSelectionMode::Fixed;
     column.tts_engine_id = j.value("tts_engine_id", std::string{"sherpa-vits"});
     column.tts_model_id = j.value("tts_model_id", std::string{});
 }
@@ -216,6 +232,16 @@ void from_json(const json& j, AppConfig& config) {
         for (auto& mapping : config.sheet_mappings) {
             for (auto& column : mapping.columns) {
                 column.language_user_overridden = false;
+                column.language_selection_mode = LanguageSelectionMode::Auto;
+            }
+        }
+    } else if (schema_version < 3) {
+        for (auto& mapping : config.sheet_mappings) {
+            for (auto& column : mapping.columns) {
+                column.language_selection_mode = column.language_user_overridden
+                    ? LanguageSelectionMode::Fixed
+                    : LanguageSelectionMode::Auto;
+                column.language_user_overridden = column.language_selection_mode == LanguageSelectionMode::Fixed;
             }
         }
     }
@@ -255,10 +281,17 @@ ConfigLoadResult JsonConfigStore::LoadOrDefault() const {
         return result;
     } catch (const std::exception& ex) {
         const auto backup = CorruptBackupPath(path_);
-        std::filesystem::rename(path_, backup);
+        std::error_code ec;
+        std::filesystem::rename(path_, backup, ec);
+        if (ec) {
+            result.status = ConfigLoadStatus::CorruptBackupFailed;
+            result.allow_save = false;
+            result.message = "配置文件损坏且备份失败，未覆盖原文件: " + ec.message() + "；原始错误: " + ex.what();
+            return result;
+        }
         result.status = ConfigLoadStatus::CorruptBackedUp;
         result.backup_path = backup;
-        result.message = "配置文件损坏，已备份为 " + PathUtf8(backup) + "；本次使用默认配置: " + ex.what();
+        result.message = "配置文件损坏，已备份为 " + PathToUtf8(backup) + "；本次使用默认配置: " + ex.what();
         return result;
     }
 }

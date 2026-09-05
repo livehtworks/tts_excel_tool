@@ -4,11 +4,14 @@
 #include "core/unicode/Utf8.h"
 #include "core/workbook/ColumnAnalyzer.h"
 #include "core/workbook/ViewBuilder.h"
+#include "platform/UnicodePath.h"
 #include "services/CompareService.h"
+#include "services/CorpusViewService.h"
 
 #include "TestCheck.h"
 
 #include <cmath>
+#include <filesystem>
 #include <iostream>
 
 using namespace adayo;
@@ -74,6 +77,55 @@ static void TestColumnGuess() {
     REQUIRE(a.GuessType("测试结果") == SuggestedColumnType::Result);
 }
 
+static void TestUnicodePathRoundTrip() {
+    const std::filesystem::path path = PathFromUtf8("中文路径/日本語/한국어/العربية/空格 路径/(demo)/语料.xlsx");
+    REQUIRE(PathFromUtf8(PathToUtf8(path)) == path);
+}
+
+static void TestPlayEditInvalidatesOnlyEditedResult() {
+    CorpusViewService service;
+    auto session = service.CreateSession(
+        {{"功能A", "hello\nworld", "你好\n世界"}},
+        {
+            {0, "功能", "A", ColumnRole::Reference, "", ""},
+            {1, "英语", "B", ColumnRole::Play, "en-US", "sherpa-vits"},
+            {2, "中文", "C", ColumnRole::Play, "zh-CN", "sherpa-vits"},
+        });
+    service.CycleResult(session, 0, 3);
+    service.CycleResult(session, 1, 3);
+    service.CycleResult(session, 0, 5);
+
+    service.UpdateDisplayCell(session, 0, 2, "hello edited");
+
+    REQUIRE(session.view.rows[0][3].empty());
+    REQUIRE(session.view.rows[1][3] == "✔");
+    REQUIRE(session.view.rows[0][5] == "✔");
+}
+
+static void TestReferenceEditInvalidatesRawRowResultsOnly() {
+    CorpusViewService service;
+    auto session = service.CreateSession(
+        {{"功能A", "hello\nworld", "你好\n世界"}, {"功能B", "again", "再次"}},
+        {
+            {0, "功能", "A", ColumnRole::Reference, "", ""},
+            {1, "英语", "B", ColumnRole::Play, "en-US", "sherpa-vits"},
+            {2, "中文", "C", ColumnRole::Play, "zh-CN", "sherpa-vits"},
+        });
+    service.CycleResult(session, 0, 3);
+    service.CycleResult(session, 1, 3);
+    service.CycleResult(session, 0, 5);
+    service.CycleResult(session, 1, 5);
+    service.CycleResult(session, 2, 3);
+
+    service.UpdateDisplayCell(session, 0, 1, "功能A 改");
+
+    REQUIRE(session.view.rows[0][3].empty());
+    REQUIRE(session.view.rows[0][5].empty());
+    REQUIRE(session.view.rows[1][3].empty());
+    REQUIRE(session.view.rows[1][5].empty());
+    REQUIRE(session.view.rows[2][3] == "✔");
+}
+
 int main() {
     return test::RunTestMain("adayo_core_tests", [] {
         TestUtf8();
@@ -82,5 +134,8 @@ int main() {
         TestSequenceAlignmentMissing();
         TestViewExpansion();
         TestColumnGuess();
+        TestUnicodePathRoundTrip();
+        TestPlayEditInvalidatesOnlyEditedResult();
+        TestReferenceEditInvalidatesRawRowResultsOnly();
     });
 }

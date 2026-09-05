@@ -6,6 +6,7 @@
 #include <chrono>
 #include <iostream>
 #include <set>
+#include <stdexcept>
 
 using namespace adayo;
 
@@ -113,6 +114,58 @@ void TestUnicodePunctuationWithUtf8proc() {
 #endif
 }
 
+void TestAnchorCannotBypassAlignmentThreshold() {
+    CompareService service;
+    CompareOptions options;
+    options.alignment.alignment_threshold = 99.0;
+    options.alignment.anchor_threshold = 95.0;
+    options.pass_threshold = 100.0;
+    auto rows = service.Compare({"abcdefghij"}, {"abcdefghiX"}, options);
+    REQUIRE(rows.size() == 2);
+    REQUIRE(ContainsStatusForReference(rows, "abcdefghij", CompareStatus::Missing));
+    REQUIRE(ContainsExtra(rows, "abcdefghiX"));
+}
+
+void TestInvalidThresholdsRejected() {
+    CompareService service;
+    CompareOptions options;
+    options.alignment.alignment_threshold = 101.0;
+    bool threw = false;
+    try {
+        (void)service.Compare({"a"}, {"a"}, options);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    REQUIRE(threw);
+
+    options = {};
+    options.alignment.alignment_threshold = 90.0;
+    options.pass_threshold = 80.0;
+    threw = false;
+    try {
+        (void)service.Compare({"a"}, {"a"}, options);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    REQUIRE(threw);
+}
+
+void TestCompareMatrixBudgetRejectsOversizeInput() {
+    CompareService service;
+    CompareOptions options;
+    options.alignment.alignment_threshold = 70.0;
+    options.pass_threshold = 100.0;
+    std::vector<std::string> reference(9000, "same");
+    std::vector<std::string> actual(9000, "same");
+    bool threw = false;
+    try {
+        (void)service.Compare(reference, actual, options);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    REQUIRE(threw);
+}
+
 void TestTextImporterBomAndDelimiter() {
     TextImportOptions newline_options;
     auto records = TextFileImporter::SplitUtf8Records("\xEF\xBB\xBF第一行\r\n第二行\n\n第三行", newline_options);
@@ -148,6 +201,34 @@ void TestTextImporterUtf16Bom() {
     REQUIRE(records.size() == 2);
     REQUIRE(records[0] == "中文");
     REQUIRE(records[1] == "B");
+}
+
+void TestTextImporterGb18030AndInvalidBytes() {
+    std::string gb18030;
+    for (unsigned char c : {0xD6, 0xD0, 0xCE, 0xC4, 0x0A, 0x41}) {
+        gb18030.push_back(static_cast<char>(c));
+    }
+    auto records = TextFileImporter::SplitUtf8Records(gb18030);
+    REQUIRE(records.size() == 2);
+    REQUIRE(records[0] == "中文");
+    REQUIRE(records[1] == "A");
+
+    TextImportOptions utf8_only;
+    utf8_only.encoding = TextEncoding::Utf8;
+    bool threw = false;
+    try {
+        (void)TextFileImporter::SplitUtf8Records(std::string("\xFF\xFF", 2), utf8_only);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    REQUIRE(threw);
+}
+
+void TestTextImporterSkipsUnicodeWhitespaceOnlyRecords() {
+    TextImportOptions options;
+    auto records = TextFileImporter::SplitUtf8Records("   \n\t\r\n　\n  keep  \n", options);
+    REQUIRE(records.size() == 1);
+    REQUIRE(records[0] == "  keep  ");
 }
 
 void TestPerformance1000() {
@@ -206,8 +287,13 @@ int main() {
         TestFixedAlignmentSet();
         TestPunctuationSwitch();
         TestUnicodePunctuationWithUtf8proc();
+        TestAnchorCannotBypassAlignmentThreshold();
+        TestInvalidThresholdsRejected();
+        TestCompareMatrixBudgetRejectsOversizeInput();
         TestTextImporterBomAndDelimiter();
         TestTextImporterUtf16Bom();
+        TestTextImporterGb18030AndInvalidBytes();
+        TestTextImporterSkipsUnicodeWhitespaceOnlyRecords();
         TestPerformance1000();
         TestPerformance5000WithRapidfuzz();
     });

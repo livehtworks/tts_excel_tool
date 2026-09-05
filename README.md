@@ -44,8 +44,8 @@ ctest --test-dir build --output-on-failure
 共享 `windows-release` preset 不包含个人机器绝对路径。先设置两个环境变量：
 
 ```powershell
-$env:VCPKG_ROOT = "D:/path/to/vcpkg"
-$env:ADAYO_SHERPA_ONNX_ROOT = "D:/path/to/sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib"
+$env:VCPKG_ROOT = "<path-to-vcpkg>"
+$env:ADAYO_SHERPA_ONNX_ROOT = "<path-to-sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib>"
 ```
 
 然后构建：
@@ -72,4 +72,4 @@ ctest --preset windows-release --output-on-failure
 - UI 直接持有模型对象/Excel 对象
 - raw UTF-8 `std::string` 字节级文本距离/Diff
 
-完整执行顺序见 `docs/CODEX_EXECUTION_PLAN.md`。
+当前事实与验收状态见 `docs/PROJECT_STATUS.md` 和 `docs/VERIFICATION_REPORT.md`。历史 seed 执行方案已移入 `docs/history/CODEX_EXECUTION_PLAN.md`，不得作为当前执行清单。

@@ -6,6 +6,13 @@
 wxWidgets UI (Windows GUI thread)
         |
         v
+ApplicationRuntime
+  - FileLogger
+  - BackgroundJob WorkerQueue
+  - WorkbookService / ModelRegistry
+  - TtsService / MiniaudioPlayer / PlaybackService
+        |
+        v
 Application Services
   - WorkbookService
   - TtsService
@@ -43,21 +50,45 @@ Adapters
 ## 3. 线程模型
 
 ```text
-GUI Thread
-   | submit
-   v
-Single WorkerQueue
-   |-- Excel IO
-   |-- model load/unload
-   |-- TTS synthesis
-   |-- text alignment
+wxWidgets GUI Thread
+│
+├── UI only
+│   ├── wx controls
+│   ├── validation
+│   └── immutable request snapshots
+│
+├── ApplicationRuntime
+│   ├── FileLogger
+│   ├── WorkbookService
+│   ├── ModelRegistry
+│   ├── TtsService
+│   ├── MiniaudioPlayer
+│   ├── PlaybackService
+│   │   └── PlaybackWorker
+│   └── BackgroundJobWorker
+│
+├── TtsPanel
+│   ├── CorpusMappingPanel
+│   └── CorpusRunPanel
+│
+└── ComparePanel
+
+BackgroundJobWorker
+   |-- Excel Sheet read/analyze
+   |-- text import/compare
    `-- XLSX export
+
+PlaybackWorker
+   |-- TTS model ensure/load/switch
+   |-- TTS synthesis
+   |-- sequence timing
+   `-- playback state machine
 
 Audio device callback/thread由 miniaudio 自身管理，PlaybackService 持有播放状态。
 Worker 完成后用 wxThreadEvent / CallAfter 回 UI。
 ```
 
-第一版不引入线程池、事件总线、actor、协程框架。需要并发时必须有实际性能证据再扩展。
+项目自建 worker 固定为 2 条：`BackgroundJobWorker` 和 `PlaybackWorker`。第一版不引入线程池、事件总线、actor、协程框架。
 
 ## 4. TTS 生命周期
 
@@ -66,6 +97,7 @@ Worker 完成后用 wxThreadEvent / CallAfter 回 UI。
 - 选择 voice 时加载一次模型；
 - 同一 voice 连续合成默认复用 engine；
 - 切换 voice 时显式 unload/load；
+- UI 只构造播放请求，不在 wx 事件处理函数里加载或卸载 TTS 模型；
 - 任何 backend 错误直接显示，不做隐藏 fallback；
 - sherpa-onnx 的具体 API/version 只允许存在于 `SherpaOnnxTtsEngine`；
 - MOSS 推理图的具体 orchestration 只允许存在于 `MossNanoTtsEngine`。
@@ -75,7 +107,8 @@ Worker 完成后用 wxThreadEvent / CallAfter 回 UI。
 - 文件路径：使用 `std::filesystem::path` 作为 domain/service 边界，不在上层转换成 ANSI `char*`。
 - 文本：业务层保存 UTF-8；文本算法开始时 decode 为 code point 序列。
 - 正式生产归一化：utf8proc NFKC + casefold（按配置）+ 空白处理 + 可选标点忽略。
-- Excel/TTS adapter 如第三方库的 Windows Unicode 文件路径能力不足，必须在 adapter 内做 Unicode-safe staging，不得把临时英文路径泄漏成业务路径。
+- OpenXLSX 直接打开请求的 Unicode workbook path；libxlsxwriter 通过 memory output buffer + native filesystem write 输出到请求路径；不得重新引入临时 ASCII staging。
+- sherpa-onnx v1.13.6 的模型路径必须通过中文目录硬门禁后才能宣称支持。
 
 ## 6. Excel
 

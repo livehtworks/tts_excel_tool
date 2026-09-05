@@ -7,9 +7,18 @@
 
 namespace adayo {
 
+enum class TextEncoding {
+    Auto,
+    Utf8,
+    Utf16LE,
+    Utf16BE,
+    Gb18030,
+};
+
 struct TextImportOptions {
     std::string delimiter;
     bool skip_empty{true};
+    TextEncoding encoding{TextEncoding::Auto};
 };
 
 class TextFileImporter {

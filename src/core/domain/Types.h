@@ -24,6 +24,11 @@ enum class SuggestedColumnType {
     Result,
 };
 
+enum class LanguageSelectionMode {
+    Auto,
+    Fixed,
+};
+
 enum class CompareStatus {
     Ok,
     Ng,
@@ -53,6 +58,7 @@ struct ColumnProfile {
     ColumnRole role{ColumnRole::Ignore};
     std::string language_code;
     bool language_user_overridden{false};
+    LanguageSelectionMode language_selection_mode{LanguageSelectionMode::Auto};
     std::string tts_engine_id{"sherpa-vits"};
     std::string tts_model_id;
 };

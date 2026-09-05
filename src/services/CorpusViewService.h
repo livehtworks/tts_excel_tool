@@ -33,6 +33,8 @@ public:
 
 private:
     static ResultIdentity ResultKey(const RuntimeView& view, std::size_t display_row, std::size_t result_display_column);
+    static void InvalidateResultSegment(CorpusSession& session, std::size_t raw_row, std::size_t source_column, std::size_t segment);
+    static void InvalidateResultsForRawRow(CorpusSession& session, std::size_t raw_row);
     static void InvalidateResultsFromSegment(CorpusSession& session, std::size_t raw_row, std::size_t source_column, std::size_t first_segment);
     static std::string JoinSegments(std::vector<std::string> segments);
     ViewBuilder builder_;

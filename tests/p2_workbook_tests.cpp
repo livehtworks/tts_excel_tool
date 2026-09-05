@@ -142,6 +142,7 @@ void TestJsonConfigStoreRoundTrip() {
     auto saved_profiles = profiles;
     saved_profiles[1].tts_model_id = "vits-piper-en_US-amy-low";
     saved_profiles[1].language_user_overridden = true;
+    saved_profiles[1].language_selection_mode = LanguageSelectionMode::Fixed;
     config.sheet_mappings.push_back({"fixture:vehicle", "Vehicle", 2, saved_profiles});
     config.sheet_header_rows.push_back({"fixture:vehicle", "Vehicle", 2});
 
@@ -152,7 +153,7 @@ void TestJsonConfigStoreRoundTrip() {
 
     REQUIRE(loaded.last_workbook == config.last_workbook);
     REQUIRE(loaded.last_sheet == config.last_sheet);
-    REQUIRE(loaded.schema_version == 2);
+    REQUIRE(loaded.schema_version == 3);
     REQUIRE(loaded.speech_rate == config.speech_rate);
     REQUIRE(loaded.sheet_header_rows.size() == 1);
     REQUIRE(loaded.sheet_header_rows[0].header_row == 2);
@@ -163,6 +164,7 @@ void TestJsonConfigStoreRoundTrip() {
     REQUIRE(loaded.sheet_mappings[0].columns[2].language_code == "ar-SA");
     REQUIRE(loaded.sheet_mappings[0].columns[1].tts_model_id == "vits-piper-en_US-amy-low");
     REQUIRE(loaded.sheet_mappings[0].columns[1].language_user_overridden);
+    REQUIRE(loaded.sheet_mappings[0].columns[1].language_selection_mode == LanguageSelectionMode::Fixed);
 
     std::error_code ec;
     std::filesystem::remove(path, ec);
@@ -260,8 +262,9 @@ void TestJsonConfigV1LanguageMigrationDoesNotOverrideAnalyzer() {
 
     JsonConfigStore store(path);
     const auto loaded = store.Load();
-    REQUIRE(loaded.schema_version == 2);
+    REQUIRE(loaded.schema_version == 3);
     REQUIRE(!loaded.sheet_mappings[0].columns[0].language_user_overridden);
+    REQUIRE(loaded.sheet_mappings[0].columns[0].language_selection_mode == LanguageSelectionMode::Auto);
 
     WorkbookService service(std::make_unique<OpenXlsxWorkbookReader>());
     auto analysis = service.AnalyzeSheet(FixturePath(), "Vehicle", 2, loaded);
@@ -270,9 +273,34 @@ void TestJsonConfigV1LanguageMigrationDoesNotOverrideAnalyzer() {
     auto config = loaded;
     config.sheet_mappings[0].workbook_identity = analysis.identity;
     config.sheet_mappings[0].columns[0].language_user_overridden = true;
+    config.sheet_mappings[0].columns[0].language_selection_mode = LanguageSelectionMode::Fixed;
     WorkbookService::UpsertMapping(config, config.sheet_mappings[0]);
     analysis = service.AnalyzeSheet(FixturePath(), "Vehicle", 2, config);
     REQUIRE(FindColumn(analysis.columns, "ARG").language_code == "en-US");
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+void TestJsonConfigV3FixedLanguageSurvivesWhenEqualToGuess() {
+    AppConfig config;
+    ColumnAnalyzer analyzer;
+    auto columns = analyzer.Analyze({"ENG"}, {{"Turn on feature A"}});
+    columns[0].selected = true;
+    columns[0].role = ColumnRole::Play;
+    columns[0].language_code = columns[0].guessed_language;
+    columns[0].language_user_overridden = true;
+    columns[0].language_selection_mode = LanguageSelectionMode::Fixed;
+    config.sheet_mappings.push_back({"fixture:vehicle", "Vehicle", 2, columns});
+
+    const auto path = std::filesystem::temp_directory_path() / "adayo_config_store_test" / "config_v3_fixed_equal_guess.json";
+    JsonConfigStore store(path);
+    store.Save(config);
+    const auto loaded = store.Load();
+    REQUIRE(loaded.schema_version == 3);
+    REQUIRE(loaded.sheet_mappings[0].columns[0].language_code == columns[0].guessed_language);
+    REQUIRE(loaded.sheet_mappings[0].columns[0].language_user_overridden);
+    REQUIRE(loaded.sheet_mappings[0].columns[0].language_selection_mode == LanguageSelectionMode::Fixed);
 
     std::error_code ec;
     std::filesystem::remove(path, ec);
@@ -376,6 +404,56 @@ void TestModelRegistryKeepsValidModelsWhenOneIsBroken() {
     std::filesystem::remove_all(root, ec);
 }
 
+void WriteMinimalModel(const std::filesystem::path& dir, const std::string& id) {
+    std::filesystem::create_directories(dir / "espeak-ng-data");
+    std::ofstream(dir / "model.onnx").put('\0');
+    std::ofstream(dir / "tokens.txt").put('\0');
+    std::ofstream config_file(dir / "model.json", std::ios::binary | std::ios::trunc);
+    config_file << R"({"id":")" << id
+                << R"(","display_name":")" << id
+                << R"(","engine_id":"sherpa-vits","model":"model.onnx","tokens":"tokens.txt","data_dir":"espeak-ng-data","language_code":"en-US"})";
+}
+
+void TestModelRegistryRejectsDuplicateIdsAndEscapingPaths() {
+    const auto root = std::filesystem::temp_directory_path() / "adayo_model_registry_security_test";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    WriteMinimalModel(root / "dup-a", "dup");
+    WriteMinimalModel(root / "dup-b", "dup");
+    WriteMinimalModel(root / "good", "good");
+    std::filesystem::create_directories(root / "escape");
+    {
+        std::ofstream(root / "outside.onnx").put('\0');
+        std::ofstream(root / "escape" / "tokens.txt").put('\0');
+        std::ofstream config_file(root / "escape" / "model.json", std::ios::binary | std::ios::trunc);
+        config_file << R"({"id":"escape","engine_id":"sherpa-vits","model":"../outside.onnx","tokens":"tokens.txt","language_code":"en-US"})";
+    }
+    std::filesystem::create_directories(root / "wrong-engine");
+    {
+        std::ofstream(root / "wrong-engine" / "model.onnx").put('\0');
+        std::ofstream(root / "wrong-engine" / "tokens.txt").put('\0');
+        std::ofstream config_file(root / "wrong-engine" / "model.json", std::ios::binary | std::ios::trunc);
+        config_file << R"({"id":"wrong-engine","engine_id":"other","model":"model.onnx","tokens":"tokens.txt","language_code":"en-US"})";
+    }
+
+    ModelRegistry registry(root);
+    const auto scan = registry.ScanSherpaModelsWithDiagnostics();
+    REQUIRE(scan.entries.size() == 1);
+    REQUIRE(scan.entries[0].id == "good");
+    bool duplicate = false;
+    bool escape = false;
+    bool engine = false;
+    for (const auto& invalid : scan.invalid) {
+        duplicate = duplicate || invalid.error.find("重复 model id") != std::string::npos;
+        escape = escape || invalid.error.find("越出 voice 根目录") != std::string::npos;
+        engine = engine || invalid.error.find("ENGINE_MISMATCH") != std::string::npos;
+    }
+    REQUIRE(duplicate);
+    REQUIRE(escape);
+    REQUIRE(engine);
+    std::filesystem::remove_all(root, ec);
+}
+
 void TestCorpusViewEditAndResultCycle() {
     OpenXlsxWorkbookReader reader;
     const auto vehicle = reader.ReadSheet(FixturePath(), "Vehicle", 2);
@@ -467,10 +545,12 @@ int main() {
         TestJsonConfigCorruptBackupAndSafeSave();
         TestJsonConfigFutureSchemaRefusesOverwrite();
         TestJsonConfigV1LanguageMigrationDoesNotOverrideAnalyzer();
+        TestJsonConfigV3FixedLanguageSurvivesWhenEqualToGuess();
         TestWorkbookMappingIdentityIncludesHeaderRow();
         TestWorkbookIdentityIgnoresContentVersion();
         TestSavedLanguageOverrideSemantics();
         TestModelRegistryKeepsValidModelsWhenOneIsBroken();
+        TestModelRegistryRejectsDuplicateIdsAndEscapingPaths();
         TestCorpusViewEditAndResultCycle();
         TestResultIdentitySurvivesEarlierRowStructureEdit();
         TestSyntheticBlankCannotBeEditedOrMarked();

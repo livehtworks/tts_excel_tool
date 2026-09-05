@@ -12,6 +12,7 @@ enum class ConfigLoadStatus {
     Loaded,
     Missing,
     CorruptBackedUp,
+    CorruptBackupFailed,
     FutureSchema,
 };
 

@@ -1,37 +1,34 @@
 #include "ui/TtsPanel.h"
 
-#include "adapters/tts/SherpaOnnxTtsEngine.h"
+#include "app/ApplicationRuntime.h"
 #include "ui/CorpusMappingPanel.h"
 #include "ui/CorpusRunPanel.h"
-
-#include <filesystem>
-#include <memory>
+#include "ui/UiString.h"
 
 #include <wx/notebook.h>
 #include <wx/sizer.h>
-#include <wx/stdpaths.h>
 
 namespace adayo::ui {
-namespace {
-std::filesystem::path ModelsRoot() {
-    const std::filesystem::path exe_path(wxStandardPaths::Get().GetExecutablePath().ToStdWstring());
-    return exe_path.parent_path() / "models" / "sherpa";
-}
-} // namespace
 
-TtsPanel::TtsPanel(wxWindow* parent)
+TtsPanel::TtsPanel(wxWindow* parent, ApplicationRuntime& runtime)
     : wxPanel(parent),
-      model_registry_(ModelsRoot()),
-      playback_service_(tts_service_, audio_player_) {
-    tts_service_.SetEngine(std::make_unique<SherpaOnnxTtsEngine>());
-    model_scan_ = model_registry_.ScanSherpaModelsWithDiagnostics();
-
+      runtime_(runtime) {
     auto* root = new wxBoxSizer(wxVERTICAL);
     auto* notebook = new wxNotebook(this, wxID_ANY);
-    auto* run_panel = new CorpusRunPanel(notebook, &model_scan_.entries, &tts_service_, &playback_service_);
-    notebook->AddPage(new CorpusMappingPanel(notebook, run_panel), "列映射", true);
-    notebook->AddPage(run_panel, "运行视图", false);
+    run_panel_ = new CorpusRunPanel(notebook, runtime_);
+    mapping_panel_ = new CorpusMappingPanel(notebook, runtime_, run_panel_);
+    notebook->AddPage(mapping_panel_, WxUtf8("列映射"), true);
+    notebook->AddPage(run_panel_, WxUtf8("运行视图"), false);
     root->Add(notebook, 1, wxEXPAND);
     SetSizer(root);
 }
+
+void TtsPanel::BeginShutdown() {
+    if (closing_) return;
+    closing_ = true;
+    if (mapping_panel_) mapping_panel_->BeginShutdown();
+    if (run_panel_) run_panel_->BeginShutdown();
+    Disable();
+}
+
 } // namespace adayo::ui

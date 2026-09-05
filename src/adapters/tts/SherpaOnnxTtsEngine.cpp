@@ -1,8 +1,11 @@
 #include "adapters/tts/SherpaOnnxTtsEngine.h"
 
+#include "platform/UnicodePath.h"
+
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <memory>
 #include <stdexcept>
 
 #ifdef ADAYO_HAS_SHERPA_ONNX
@@ -10,6 +13,17 @@
 #endif
 
 namespace adayo {
+namespace {
+
+std::filesystem::path RequiredPathFromUtf8(const std::string& value, const char* label) {
+    const auto path = PathFromUtf8(value);
+    if (path.empty() || !std::filesystem::exists(path)) {
+        throw std::runtime_error("sherpa-onnx 模型缺失 " + std::string(label) + ": " + PathToUtf8(path));
+    }
+    return path;
+}
+
+} // namespace
 
 struct SherpaOnnxTtsEngine::Impl {
     TtsModelConfig config;
@@ -33,16 +47,13 @@ void SherpaOnnxTtsEngine::Load(const TtsModelConfig& config) {
     Unload();
     impl_->config = config;
 #ifdef ADAYO_HAS_SHERPA_ONNX
-    for (const auto& [path, label] : {
-             std::pair{impl_->config.model_path, "model"},
-             std::pair{impl_->config.tokens_path, "tokens"},
-         }) {
-        if (path.empty() || !std::filesystem::exists(path)) {
-            throw std::runtime_error("sherpa-onnx 模型缺失 " + std::string(label) + ": " + path);
-        }
+    RequiredPathFromUtf8(impl_->config.model_path, "model");
+    RequiredPathFromUtf8(impl_->config.tokens_path, "tokens");
+    if (!impl_->config.data_dir.empty()) {
+        RequiredPathFromUtf8(impl_->config.data_dir, "data_dir");
     }
-    if (!impl_->config.data_dir.empty() && !std::filesystem::exists(impl_->config.data_dir)) {
-        throw std::runtime_error("sherpa-onnx 模型缺失 data_dir: " + impl_->config.data_dir);
+    if (!impl_->config.lexicon_path.empty()) {
+        RequiredPathFromUtf8(impl_->config.lexicon_path, "lexicon");
     }
 
     SherpaOnnxOfflineTtsConfig c{};
@@ -83,15 +94,19 @@ AudioBuffer SherpaOnnxTtsEngine::Synthesize(const TtsRequest& request) {
     generation.sid = request.speaker_id;
     generation.speed = static_cast<float>(std::clamp(request.speed, 0.5, 2.0));
 
-    const SherpaOnnxGeneratedAudio* audio = SherpaOnnxOfflineTtsGenerateWithConfig(
+    using AudioPtr = std::unique_ptr<const SherpaOnnxGeneratedAudio, decltype(&SherpaOnnxDestroyOfflineTtsGeneratedAudio)>;
+    const SherpaOnnxGeneratedAudio* raw_audio = SherpaOnnxOfflineTtsGenerateWithConfig(
         impl_->tts, request.text.c_str(), &generation, nullptr, nullptr);
+    AudioPtr audio(raw_audio, SherpaOnnxDestroyOfflineTtsGeneratedAudio);
     if (!audio) throw std::runtime_error("sherpa-onnx TTS 生成失败");
+    if (audio->sample_rate <= 0 || audio->n <= 0 || audio->samples == nullptr) {
+        throw std::runtime_error("TTS_INVALID_AUDIO: sherpa-onnx 返回无效音频");
+    }
 
     AudioBuffer result;
     result.sample_rate = audio->sample_rate;
     result.channels = 1;
     result.samples.assign(audio->samples, audio->samples + audio->n);
-    SherpaOnnxDestroyOfflineTtsGeneratedAudio(audio);
     return result;
 #else
     (void)request;

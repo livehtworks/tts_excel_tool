@@ -21,7 +21,7 @@ struct SheetMappingConfig {
 };
 
 struct AppConfig {
-    int schema_version{2};
+    int schema_version{3};
     std::string last_workbook;
     std::string last_sheet;
     double speech_rate{1.0};

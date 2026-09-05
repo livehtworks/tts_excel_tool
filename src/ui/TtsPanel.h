@@ -1,21 +1,24 @@
 #pragma once
 
-#include "adapters/audio/MiniaudioPlayer.h"
-#include "services/ModelRegistry.h"
-#include "services/PlaybackService.h"
-#include "services/TtsService.h"
-
 #include <wx/panel.h>
 
+namespace adayo {
+class ApplicationRuntime;
+}
+
 namespace adayo::ui {
+class CorpusMappingPanel;
+class CorpusRunPanel;
+
 class TtsPanel final : public wxPanel {
 public:
-    explicit TtsPanel(wxWindow* parent);
+    TtsPanel(wxWindow* parent, ApplicationRuntime& runtime);
+    void BeginShutdown();
+
 private:
-    ModelRegistry model_registry_;
-    ModelRegistryScanResult model_scan_;
-    TtsService tts_service_;
-    MiniaudioPlayer audio_player_;
-    PlaybackService playback_service_;
+    ApplicationRuntime& runtime_;
+    CorpusMappingPanel* mapping_panel_{};
+    CorpusRunPanel* run_panel_{};
+    bool closing_{false};
 };
 } // namespace adayo::ui

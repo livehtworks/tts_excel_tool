@@ -64,11 +64,15 @@ void CorpusViewService::UpdateDisplayCell(
             if (segment_index >= segments.size()) {
                 segments.resize(segment_index + 1);
             }
+            const bool changed = segments[segment_index] != value;
             segments[segment_index] = value;
             source_cell = JoinSegments(std::move(segments));
             const auto new_segments = ViewBuilder::SplitDisplaySegments(source_cell);
+            if (changed) {
+                InvalidateResultSegment(session, meta.raw_row_index, view_column.source_index, segment_index);
+            }
             if (new_segments.size() == old_size) {
-                session.view.rows[display_row][display_column] = value;
+                Rebuild(session);
                 return;
             }
             InvalidateResultsFromSegment(session, meta.raw_row_index, view_column.source_index, segment_index);
@@ -76,11 +80,18 @@ void CorpusViewService::UpdateDisplayCell(
             return;
         }
     } else {
+        const bool changed = source_cell != value;
         source_cell = value;
+        if (changed && view_column.role == ColumnRole::Reference) {
+            InvalidateResultsForRawRow(session, meta.raw_row_index);
+        }
         for (std::size_t row = 0; row < session.view.row_meta.size(); ++row) {
             if (session.view.row_meta[row].raw_row_index == meta.raw_row_index) {
                 session.view.rows[row][display_column] = value;
             }
+        }
+        if (changed && view_column.role == ColumnRole::Reference) {
+            Rebuild(session);
         }
         return;
     }
@@ -141,6 +152,29 @@ void CorpusViewService::InvalidateResultsFromSegment(
     for (auto it = session.result_marks.begin(); it != session.result_marks.end();) {
         const auto& key = it->first;
         if (key.raw_row_index == raw_row && key.play_source_column == source_column && key.segment_index >= first_segment) {
+            it = session.result_marks.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void CorpusViewService::InvalidateResultSegment(
+    CorpusSession& session,
+    std::size_t raw_row,
+    std::size_t source_column,
+    std::size_t segment) {
+
+    session.result_marks.erase(ResultIdentity{raw_row, source_column, segment});
+}
+
+void CorpusViewService::InvalidateResultsForRawRow(
+    CorpusSession& session,
+    std::size_t raw_row) {
+
+    for (auto it = session.result_marks.begin(); it != session.result_marks.end();) {
+        const auto& key = it->first;
+        if (key.raw_row_index == raw_row) {
             it = session.result_marks.erase(it);
         } else {
             ++it;

@@ -1,12 +1,11 @@
 #pragma once
 
 #include "services/CorpusViewService.h"
-#include "core/worker/WorkerQueue.h"
 #include "services/ModelRegistry.h"
 #include "services/PlaybackService.h"
-#include "services/TtsService.h"
 
 #include <chrono>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -21,23 +20,25 @@ class wxSpinCtrl;
 class wxSpinCtrlDouble;
 class wxStaticText;
 
-namespace adayo::ui {
+namespace adayo {
+class ApplicationRuntime;
+}
 
+namespace adayo::ui {
 class CorpusRunPanel final : public wxPanel {
 public:
-    explicit CorpusRunPanel(wxWindow* parent,
-        const std::vector<TtsModelEntry>* models = nullptr,
-        TtsService* tts = nullptr,
-        PlaybackService* playback = nullptr);
+    CorpusRunPanel(wxWindow* parent, ApplicationRuntime& runtime);
 
     void SetSession(CorpusSession session);
     const std::optional<CorpusSession>& Session() const { return session_; }
+    void BeginShutdown();
 
 private:
     void RefreshGrid();
     void PopulatePlayColumns();
     void StartPlayback(std::size_t first_row, std::size_t last_row, std::size_t view_column);
     const TtsModelEntry& ResolveModel(const SelectedColumn& column) const;
+    bool HasPlayableSegment(std::size_t row, std::size_t view_column) const;
     void HighlightPlaybackCell(std::size_t row, std::size_t column);
     void UpdatePlaybackUi();
     void OnExport(wxCommandEvent& event);
@@ -46,13 +47,14 @@ private:
     void OnResume(wxCommandEvent& event);
     void OnStop(wxCommandEvent& event);
     void OnPlaybackTimer(wxTimerEvent& event);
+    void OnPlaybackSettingsChanged(wxCommandEvent& event);
     void OnCellChanged(wxGridEvent& event);
-    void OnCellDClick(wxGridEvent& event);
+    void OnCellClick(wxGridEvent& event);
 
+    ApplicationRuntime& runtime_;
     CorpusViewService service_;
     std::optional<CorpusSession> session_;
     const std::vector<TtsModelEntry>* models_{};
-    TtsService* tts_{};
     PlaybackService* playback_{};
     std::vector<std::size_t> play_view_columns_;
     wxGrid* grid_{};
@@ -68,8 +70,9 @@ private:
     wxButton* export_button_{};
     wxStaticText* status_{};
     wxTimer playback_timer_;
-    WorkerQueue worker_;
     bool export_busy_{false};
+    bool closing_{false};
+    std::uint64_t playback_ui_generation_{0};
 };
 
 } // namespace adayo::ui

@@ -3,7 +3,6 @@
 #include "core/unicode/Utf8.h"
 
 #include <algorithm>
-#include <cctype>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -17,9 +16,17 @@ std::string Trim(const std::string& s) {
 std::string AsciiUpperCompact(const std::string& s) {
     std::string out;
     for (unsigned char c : s) {
-        if (std::isalpha(c)) out.push_back(static_cast<char>(std::toupper(c)));
+        if (c >= 'a' && c <= 'z') {
+            out.push_back(static_cast<char>(c - 'a' + 'A'));
+        } else if (c >= 'A' && c <= 'Z') {
+            out.push_back(static_cast<char>(c));
+        }
     }
     return out;
+}
+
+char AsciiLower(unsigned char c) {
+    return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : static_cast<char>(c);
 }
 
 const std::unordered_map<std::string, std::string> kTokenAliases = {
@@ -65,7 +72,7 @@ bool Contains(const std::string& s, const std::string& needle) {
 
 std::string LowerAscii(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
+        return AsciiLower(c);
     });
     return value;
 }

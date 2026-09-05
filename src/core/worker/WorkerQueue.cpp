@@ -1,10 +1,14 @@
 #include "core/worker/WorkerQueue.h"
 
 #include <stdexcept>
+#include <utility>
 
 namespace adayo {
 
-WorkerQueue::WorkerQueue() : worker_([this](std::stop_token token) { Run(token); }) {}
+WorkerQueue::WorkerQueue(ErrorHandler on_unhandled_task_error)
+    : on_unhandled_task_error_(std::move(on_unhandled_task_error)) {
+    worker_ = std::jthread([this](std::stop_token token) { Run(token); });
+}
 WorkerQueue::~WorkerQueue() { Stop(); }
 
 void WorkerQueue::Submit(Task task) {
@@ -17,10 +21,16 @@ void WorkerQueue::Submit(Task task) {
     cv_.notify_one();
 }
 
-void WorkerQueue::Stop() {
+void WorkerQueue::Stop(StopMode mode) {
     {
         std::lock_guard lock(mutex_);
+        if (stopped_) return;
+        stopped_ = true;
         accepting_ = false;
+        if (mode == StopMode::DiscardPending) {
+            std::queue<Task> empty;
+            tasks_.swap(empty);
+        }
     }
     worker_.request_stop();
     cv_.notify_all();
@@ -38,7 +48,13 @@ void WorkerQueue::Run(std::stop_token stop_token) {
             task = std::move(tasks_.front());
             tasks_.pop();
         }
-        task();
+        try {
+            task(stop_token);
+        } catch (...) {
+            if (on_unhandled_task_error_) {
+                on_unhandled_task_error_(std::current_exception());
+            }
+        }
     }
 }
 

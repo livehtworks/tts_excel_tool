@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 #include <tuple>
 
 namespace adayo {
@@ -14,6 +15,36 @@ struct Anchor {
     std::size_t a{};
     double score{};
 };
+
+void ValidateOptions(const SequenceAlignmentOptions& options) {
+    auto in_range = [](double value) {
+        return std::isfinite(value) && value >= 0.0 && value <= 100.0;
+    };
+    if (!in_range(options.alignment_threshold) || !in_range(options.anchor_threshold)) {
+        throw std::invalid_argument("对齐阈值必须在 0 到 100 之间");
+    }
+    if (!std::isfinite(options.anchor_uniqueness_margin) || options.anchor_uniqueness_margin < 0.0) {
+        throw std::invalid_argument("Anchor 唯一性阈值必须为非负数");
+    }
+    if (!std::isfinite(options.gap_penalty) || options.gap_penalty < 0.0) {
+        throw std::invalid_argument("Gap penalty 必须为非负数");
+    }
+}
+
+void RequireMatrixBudget(std::size_t ref_count, std::size_t actual_count) {
+    if (ref_count == 0 || actual_count == 0) return;
+    if (ref_count > std::numeric_limits<std::size_t>::max() / actual_count) {
+        throw std::runtime_error("对比数据过大，无法安全估算内存");
+    }
+    const std::size_t cells = ref_count * actual_count;
+    if (cells > std::numeric_limits<std::size_t>::max() / sizeof(double)) {
+        throw std::runtime_error("对比数据过大，无法安全估算内存");
+    }
+    const std::size_t bytes = cells * sizeof(double);
+    if (bytes > kCompareMatrixMemoryBudgetBytes) {
+        throw std::runtime_error("对比数据过大，预计相似度矩阵超过 512 MiB，请拆分后再对比");
+    }
+}
 
 ScoreMatrix BuildScores(const std::vector<TextRecord>& ref,
                         const std::vector<TextRecord>& act,
@@ -32,6 +63,7 @@ std::vector<Anchor> FindMonotonicAnchors(const ScoreMatrix& scores,
     if (scores.empty() || scores.front().empty()) return {};
     const std::size_t n = scores.size();
     const std::size_t m = scores.front().size();
+    const double effective_anchor_threshold = (std::max)(options.anchor_threshold, options.alignment_threshold);
 
     std::vector<std::size_t> best_ref_for_actual(m, 0);
     for (std::size_t j = 0; j < m; ++j) {
@@ -51,7 +83,7 @@ std::vector<Anchor> FindMonotonicAnchors(const ScoreMatrix& scores,
             else if (s > second) { second = s; }
         }
         const double margin = second < 0.0 ? best : best - second;
-        if (best >= options.anchor_threshold &&
+        if (best >= effective_anchor_threshold &&
             margin >= options.anchor_uniqueness_margin &&
             best_ref_for_actual[best_j] == i) {
             candidates.push_back({i, best_j, best});
@@ -139,6 +171,7 @@ std::vector<AlignmentPair> SequenceAligner::Align(
     const std::vector<TextRecord>& reference,
     const std::vector<TextRecord>& actual,
     const SequenceAlignmentOptions& options) const {
+    ValidateOptions(options);
 
     if (reference.empty()) {
         std::vector<AlignmentPair> out;
@@ -151,6 +184,7 @@ std::vector<AlignmentPair> SequenceAligner::Align(
         return out;
     }
 
+    RequireMatrixBudget(reference.size(), actual.size());
     const auto scores = BuildScores(reference, actual, similarity_);
     const auto anchors = FindMonotonicAnchors(scores, options);
 

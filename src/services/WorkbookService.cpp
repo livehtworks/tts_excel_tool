@@ -1,7 +1,8 @@
 #include "services/WorkbookService.h"
 
+#include "platform/UnicodePath.h"
+
 #include <algorithm>
-#include <cctype>
 #include <sstream>
 #include <stdexcept>
 
@@ -43,9 +44,12 @@ WorkbookAnalysis WorkbookService::AnalyzeSheet(
             if (saved != analysis.saved_mapping->columns.end()) {
                 column.selected = saved->selected;
                 column.role = saved->role;
-                if (saved->language_user_overridden) {
+                if (saved->language_selection_mode == LanguageSelectionMode::Fixed || saved->language_user_overridden) {
                     column.language_code = saved->language_code;
                     column.language_user_overridden = true;
+                    column.language_selection_mode = LanguageSelectionMode::Fixed;
+                } else {
+                    column.language_selection_mode = LanguageSelectionMode::Auto;
                 }
                 column.tts_engine_id = saved->tts_engine_id;
                 column.tts_model_id = saved->tts_model_id;
@@ -60,12 +64,11 @@ std::string WorkbookService::WorkbookIdentity(const std::filesystem::path& path)
     std::error_code ec;
     const auto absolute = std::filesystem::weakly_canonical(path, ec);
     const auto effective = ec ? std::filesystem::absolute(path, ec) : absolute;
-    const auto u8 = effective.u8string();
-    std::string path_text(u8.begin(), u8.end());
+    std::string path_text = PathToUtf8(effective);
     std::replace(path_text.begin(), path_text.end(), '\\', '/');
 #ifdef _WIN32
     std::transform(path_text.begin(), path_text.end(), path_text.begin(), [](unsigned char c) {
-        return c < 128 ? static_cast<char>(std::tolower(c)) : static_cast<char>(c);
+        return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : static_cast<char>(c);
     });
 #endif
     return path_text;

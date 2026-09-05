@@ -1,36 +1,39 @@
-# Seed 包验证报告
+# R8 Verification Report
 
-生成环境：Linux container，仅验证纯 C++ Core；没有伪造 Windows/wxWidgets/sherpa/Excel adapter 通过状态。
+本报告记录当前工作区源码的本地自动化验证事实。R8 target-machine acceptance 仍未执行，因此 `P9_TARGET_MACHINE_ACCEPTANCE_REVOKED` 继续有效。
 
 ## 已执行
 
-```bash
-cmake -S . -B build -DADAYO_BUILD_DESKTOP=OFF -DADAYO_BUILD_TESTS=ON
-cmake --build build -j2
-ctest --test-dir build --output-on-failure
+```powershell
+cmd.exe /c 'call "<VS2022>\Common7\Tools\VsDevCmd.bat" -arch=x64 >nul && cmake --build --preset windows-core'
+cmd.exe /c 'call "<VS2022>\Common7\Tools\VsDevCmd.bat" -arch=x64 >nul && ctest --preset windows-core --output-on-failure'
+
+cmd.exe /c 'call "<VS2022>\Common7\Tools\VsDevCmd.bat" -arch=x64 >nul && cmake --build --preset windows-release'
+cmd.exe /c 'call "<VS2022>\Common7\Tools\VsDevCmd.bat" -arch=x64 >nul && ctest --preset windows-release --output-on-failure'
 ```
 
-结果：`1/1 adayo_core_tests PASS`。
+## 结果
 
-## 当前自动测试覆盖
+- `windows-core` build: passed. Evidence: `logs/r8-windows-core-build-2.log`.
+- `windows-core` CTest: 4/4 passed. Evidence: `logs/r8-windows-core-ctest-2.log`.
+- `windows-release` build: passed. Evidence: `logs/r8-windows-release-build-4.log`.
+- `windows-release` CTest: 7/7 passed. Evidence: `logs/r8-windows-release-ctest-2.log`.
 
-- UTF-8 中文/阿语/英文 roundtrip；
-- code point 相似度；
-- 字符替换双侧 Diff；
-- 中间缺句后的序列恢复；
-- 旧版多行播放 cell 展开；
-- 参考列重复；
-- 列语言/类型猜测基本样本。
+## 本轮覆盖点
 
-## 明确未验证
+- R8 Reference edit raw-row invalidation semantics.
+- WorkerQueue construction stress, exception barrier, and stop-token task API.
+- OpenXLSX trailing blank-header data retention.
+- Compare anchor/alignment threshold invariant, invalid thresholds, GB18030/strict UTF-8 text import, whitespace-only filtering, and memory budget rejection.
+- XLSX final write through same-directory atomic replace helper.
+- ModelRegistry duplicate-id rejection, package-contained model paths, metadata validation, and bad-model diagnostics.
+- Playback stale-request first gate, lifecycle API removal, engine invariant, load-failure active-id clearing, sherpa audio validation, and miniaudio device lifecycle locking.
+- Config schema v3 explicit language selection mode, speech-rate persistence hook, and Compare threshold persistence hook.
+- Compare UI data-backed table snapshot and shared export snapshot.
+- Packaging/source scripts parse successfully and implement fresh staging/source hygiene rules; no package/source ZIP was generated in this verification pass.
 
-- Windows wxWidgets GUI 编译；
-- OpenXLSX 0.5.x adapter；
-- libxlsxwriter rich string adapter；
-- sherpa-onnx v1.13.x Windows native link / 连续推理；
-- miniaudio device lifecycle；
-- MOSS-TTS-Nano ONNX C++ port；
-- Windows 中文路径完整端到端；
-- 目标公司 CPU 上性能。
+## 未完成
 
-这些项目已分别进入 P1/P2/P4/P5/P7/P8/P9，不应在当前 seed 被标记为完成。
+- TSAN/ASAN/UBSAN reruns for the final R8 delta were not run in this pass.
+- Target Windows PC U01-U08 manual acceptance has not been executed.
+- MOSS-TTS-Nano native adapter remains intentionally blocked.

@@ -1,11 +1,27 @@
 #include "services/CompareService.h"
 
+#include <cmath>
+#include <stdexcept>
+
 namespace adayo {
+namespace {
+
+void ValidateCompareOptions(const CompareOptions& options) {
+    if (!std::isfinite(options.pass_threshold) || options.pass_threshold < 0.0 || options.pass_threshold > 100.0) {
+        throw std::invalid_argument("OK 阈值必须在 0 到 100 之间");
+    }
+    if (options.alignment.alignment_threshold > options.pass_threshold) {
+        throw std::invalid_argument("对齐阈值不能大于 OK 阈值");
+    }
+}
+
+} // namespace
 
 std::vector<CompareRow> CompareService::Compare(
     const std::vector<std::string>& reference,
     const std::vector<std::string>& actual,
     const CompareOptions& options) const {
+    ValidateCompareOptions(options);
 
     const TextNormalizer normalizer(options.normalizer);
     std::vector<TextRecord> ref_records;

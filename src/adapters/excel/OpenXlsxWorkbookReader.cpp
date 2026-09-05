@@ -1,10 +1,10 @@
 #include "adapters/excel/OpenXlsxWorkbookReader.h"
 
+#include "platform/UnicodePath.h"
+
 #include <algorithm>
-#include <chrono>
 #include <filesystem>
 #include <iomanip>
-#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -17,39 +17,13 @@ namespace adayo {
 
 #ifdef ADAYO_HAS_OPENXLSX
 namespace {
-bool ContainsNonAscii(const std::filesystem::path& path) {
-    const auto text = path.u8string();
-    return std::any_of(text.begin(), text.end(), [](char8_t c) {
-        return static_cast<unsigned char>(c) >= 0x80;
-    });
-}
-
-std::string NarrowUtf8(const std::filesystem::path& path) {
-    const auto text = path.u8string();
-    return {text.begin(), text.end()};
-}
-
-std::filesystem::path MakeAsciiStagingPath(const std::filesystem::path& original) {
-    const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
-    const auto hash = std::hash<std::string>{}(NarrowUtf8(original));
-    auto dir = std::filesystem::temp_directory_path() / "adayo_openxlsx";
-    std::filesystem::create_directories(dir);
-    return dir / ("workbook_" + std::to_string(hash) + "_" + std::to_string(ticks) + ".xlsx");
-}
-
 class ReadOnlyDocument {
 public:
     explicit ReadOnlyDocument(const std::filesystem::path& path) {
         if (!std::filesystem::exists(path)) {
-            throw std::runtime_error("工作簿不存在: " + NarrowUtf8(path));
+            throw std::runtime_error("工作簿不存在: " + PathToUtf8(path));
         }
-        if (ContainsNonAscii(path)) {
-            staged_path_ = MakeAsciiStagingPath(path);
-            std::filesystem::copy_file(path, *staged_path_, std::filesystem::copy_options::overwrite_existing);
-            doc_.open(staged_path_->string());
-        } else {
-            doc_.open(path.string());
-        }
+        doc_.open(PathToUtf8(path));
     }
 
     ~ReadOnlyDocument() {
@@ -57,17 +31,12 @@ public:
             doc_.close();
         } catch (...) {
         }
-        if (staged_path_) {
-            std::error_code ec;
-            std::filesystem::remove(*staged_path_, ec);
-        }
     }
 
     OpenXLSX::XLDocument& get() { return doc_; }
 
 private:
     OpenXLSX::XLDocument doc_;
-    std::optional<std::filesystem::path> staged_path_;
 };
 
 std::string CellToString(OpenXLSX::XLCellAssignable cell) {
@@ -94,11 +63,6 @@ std::string CellToString(OpenXLSX::XLCellAssignable cell) {
     }
 }
 
-void TrimTrailingEmptyCells(std::vector<std::string>& row) {
-    while (!row.empty() && row.back().empty()) {
-        row.pop_back();
-    }
-}
 } // namespace
 #endif
 
@@ -137,21 +101,30 @@ WorksheetData OpenXlsxWorkbookReader::ReadSheet(const std::filesystem::path& pat
     for (uint16_t column = 1; column <= column_count; ++column) {
         data.headers.push_back(CellToString(worksheet.findCell(static_cast<uint32_t>(header_row), column)));
     }
-    TrimTrailingEmptyCells(data.headers);
 
-    const auto effective_columns = static_cast<uint16_t>(data.headers.empty() ? column_count : data.headers.size());
+    std::vector<std::vector<std::string>> rows;
+    std::size_t last_meaningful_column = 0;
+    for (std::size_t i = 0; i < data.headers.size(); ++i) {
+        if (!data.headers[i].empty()) last_meaningful_column = i + 1;
+    }
     for (uint32_t row_number = static_cast<uint32_t>(header_row + 1); row_number <= row_count; ++row_number) {
         std::vector<std::string> row;
-        row.reserve(effective_columns);
-        for (uint16_t column = 1; column <= effective_columns; ++column) {
+        row.reserve(column_count);
+        for (uint16_t column = 1; column <= column_count; ++column) {
             row.push_back(CellToString(worksheet.findCell(row_number, column)));
+            if (!row.back().empty()) {
+                last_meaningful_column = (std::max)(last_meaningful_column, static_cast<std::size_t>(column));
+            }
         }
-        TrimTrailingEmptyCells(row);
         const bool empty = std::all_of(row.begin(), row.end(), [](const std::string& value) { return value.empty(); });
         if (!empty) {
-            row.resize(effective_columns);
-            data.rows.push_back(std::move(row));
+            rows.push_back(std::move(row));
         }
+    }
+    data.headers.resize(last_meaningful_column);
+    for (auto& row : rows) {
+        row.resize(last_meaningful_column);
+        data.rows.push_back(std::move(row));
     }
     return data;
 #else

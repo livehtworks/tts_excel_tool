@@ -2,10 +2,10 @@
 
 模型目录只存模型和 metadata，不在 C++ 中硬编码语言路径。
 
-建议最终约定：
+运行发布目录约定：
 
 ```
-models/
+dist/AdayoCorpusTool/model/
   sherpa/
     <voice-id>/
       model.json
@@ -15,6 +15,10 @@ models/
   moss/
     model.json
     ...
+  piper/
+    voices/
+      <language>/<locale>/<voice>/<quality>/*.onnx
+      <language>/<locale>/<voice>/<quality>/*.onnx.json
 ```
 
 Sherpa `model.json` schema:
@@ -39,6 +43,6 @@ Paths are relative to the voice directory unless absolute. `model` and `tokens` 
 
 UI and TTS services must use `ModelRegistry`; language/voice paths must not be hardcoded in UI code.
 
-`package-manifest.json` is the release authority for voice/model packaging. `scripts/package_windows.ps1` copies only the sherpa model ids listed there and validates each local `model.json` plus its declared model, tokens, data, lexicon, and rule FST files.
+`package-manifest.json` is copied to `dist/AdayoCorpusTool/model` for release/runtime validation. `scripts/package_windows.ps1` validates the sherpa model ids listed there against `dist/AdayoCorpusTool/model/sherpa`.
 
-The package script never downloads models. Add a model to the manifest only after it has been downloaded locally and accepted by real sherpa playback/tests.
+The package script never downloads models. Use `scripts/download_model_resources.ps1` for domestic no-proxy downloads before packaging or testing release/runtime model behavior.

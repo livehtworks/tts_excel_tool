@@ -1,13 +1,16 @@
 #include "ui/CorpusMappingPanel.h"
 
 #include "adapters/excel/OpenXlsxWorkbookReader.h"
+#include "app/ApplicationRuntime.h"
 #include "services/CorpusViewService.h"
 #include "services/ModelRegistry.h"
 #include "ui/CorpusRunPanel.h"
+#include "ui/UiString.h"
+#include "platform/UnicodePath.h"
 
 #include <filesystem>
 #include <algorithm>
-#include <cctype>
+#include <set>
 #include <stdexcept>
 
 #include <wx/button.h>
@@ -17,28 +20,11 @@
 #include <wx/sizer.h>
 #include <wx/spinctrl.h>
 #include <wx/stattext.h>
-#include <wx/stdpaths.h>
 #include <wx/textctrl.h>
 
 namespace adayo::ui {
 namespace {
-wxString FromUtf8(const std::string& text) {
-    return wxString::FromUTF8(text);
-}
-
-std::string ToUtf8(const wxString& text) {
-    return text.ToUTF8().data() ? std::string(text.ToUTF8().data()) : std::string{};
-}
-
-std::filesystem::path ConfigPath() {
-    const auto exe = std::filesystem::path(ToUtf8(wxStandardPaths::Get().GetExecutablePath()));
-    return exe.parent_path() / "config" / "config.json";
-}
-
-std::filesystem::path ModelsPath() {
-    const auto exe = std::filesystem::path(ToUtf8(wxStandardPaths::Get().GetExecutablePath()));
-    return exe.parent_path() / "models" / "sherpa";
-}
+const char* kAutoLanguageChoice = "自动 / 未指定";
 
 const char* TypeText(SuggestedColumnType type) {
     switch (type) {
@@ -62,12 +48,14 @@ const char* RoleText(ColumnRole role) {
 }
 
 ColumnRole RoleFromText(std::string text) {
-    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (text == "参考") return ColumnRole::Reference;
     if (text == "播放") return ColumnRole::Play;
     if (text == "结果") return ColumnRole::Result;
     if (text == "序号") return ColumnRole::Index;
     if (text == "忽略") return ColumnRole::Ignore;
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {
+        return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : static_cast<char>(c);
+    });
     if (text == "reference" || text == "ref") return ColumnRole::Reference;
     if (text == "play") return ColumnRole::Play;
     if (text == "result") return ColumnRole::Result;
@@ -76,40 +64,29 @@ ColumnRole RoleFromText(std::string text) {
 
 wxArrayString RoleChoices() {
     wxArrayString values;
-    values.Add("忽略");
-    values.Add("参考");
-    values.Add("播放");
+    values.Add(WxUtf8("忽略"));
+    values.Add(WxUtf8("参考"));
+    values.Add(WxUtf8("播放"));
     return values;
 }
 
-wxArrayString LanguageChoices() {
-    wxArrayString values;
-    for (const auto& language : ColumnAnalyzer::Languages()) {
-        values.Add(FromUtf8(language.code));
-    }
-    return values;
-}
 } // namespace
 
-CorpusMappingPanel::CorpusMappingPanel(wxWindow* parent, CorpusRunPanel* run_panel)
+CorpusMappingPanel::CorpusMappingPanel(wxWindow* parent, ApplicationRuntime& runtime, CorpusRunPanel* run_panel)
     : wxPanel(parent),
-      run_panel_(run_panel),
-      workbook_service_(std::make_unique<WorkbookService>(std::make_unique<OpenXlsxWorkbookReader>())),
-      config_store_(ConfigPath()) {
+      runtime_(runtime),
+      run_panel_(run_panel) {
 
-    const auto config_load = config_store_.LoadOrDefault();
-    config_ = config_load.config;
-    config_save_allowed_ = config_load.allow_save;
-    initial_config_warning_ = config_load.message;
-    LoadModelRegistry();
+    const auto config = runtime_.ConfigSnapshot();
+    RefreshModelRegistry();
 
     auto* root = new wxBoxSizer(wxVERTICAL);
 
     auto* file_row = new wxBoxSizer(wxHORIZONTAL);
-    workbook_path_ = new wxTextCtrl(this, wxID_ANY, FromUtf8(config_.last_workbook));
-    browse_button_ = new wxButton(this, wxID_ANY, "浏览");
-    load_button_ = new wxButton(this, wxID_ANY, "读取 Sheet");
-    file_row->Add(new wxStaticText(this, wxID_ANY, "Excel"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    workbook_path_ = new wxTextCtrl(this, wxID_ANY, WxUtf8(config.last_workbook));
+    browse_button_ = new wxButton(this, wxID_ANY, WxUtf8("浏览"));
+    load_button_ = new wxButton(this, wxID_ANY, WxUtf8("读取 Sheet"));
+    file_row->Add(new wxStaticText(this, wxID_ANY, WxUtf8("Excel")), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     file_row->Add(workbook_path_, 1, wxRIGHT, 6);
     file_row->Add(browse_button_, 0, wxRIGHT, 6);
     file_row->Add(load_button_, 0);
@@ -120,20 +97,20 @@ CorpusMappingPanel::CorpusMappingPanel(wxWindow* parent, CorpusRunPanel* run_pan
     header_row_ = new wxSpinCtrl(this, wxID_ANY);
     header_row_->SetRange(1, 1000);
     header_row_->SetValue(1);
-    analyze_button_ = new wxButton(this, wxID_ANY, "分析列");
-    build_button_ = new wxButton(this, wxID_ANY, "生成运行视图");
-    save_button_ = new wxButton(this, wxID_ANY, "保存映射");
-    select_all_button_ = new wxButton(this, wxID_ANY, "全选");
-    select_none_button_ = new wxButton(this, wxID_ANY, "全不选");
+    analyze_button_ = new wxButton(this, wxID_ANY, WxUtf8("分析列"));
+    build_button_ = new wxButton(this, wxID_ANY, WxUtf8("生成运行视图"));
+    save_button_ = new wxButton(this, wxID_ANY, WxUtf8("保存映射"));
+    select_all_button_ = new wxButton(this, wxID_ANY, WxUtf8("全选"));
+    select_none_button_ = new wxButton(this, wxID_ANY, WxUtf8("全不选"));
     batch_role_ = new wxChoice(this, wxID_ANY);
-    batch_role_->Append("忽略");
-    batch_role_->Append("参考");
-    batch_role_->Append("播放");
+    batch_role_->Append(WxUtf8("忽略"));
+    batch_role_->Append(WxUtf8("参考"));
+    batch_role_->Append(WxUtf8("播放"));
     batch_role_->SetSelection(0);
-    apply_role_button_ = new wxButton(this, wxID_ANY, "批量用途");
-    sheet_row->Add(new wxStaticText(this, wxID_ANY, "Sheet"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    apply_role_button_ = new wxButton(this, wxID_ANY, WxUtf8("批量用途"));
+    sheet_row->Add(new wxStaticText(this, wxID_ANY, WxUtf8("Sheet")), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     sheet_row->Add(sheet_choice_, 1, wxRIGHT, 12);
-    sheet_row->Add(new wxStaticText(this, wxID_ANY, "表头行"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    sheet_row->Add(new wxStaticText(this, wxID_ANY, WxUtf8("表头行")), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     sheet_row->Add(header_row_, 0, wxRIGHT, 12);
     sheet_row->Add(analyze_button_, 0, wxRIGHT, 6);
     sheet_row->Add(build_button_, 0, wxRIGHT, 6);
@@ -148,12 +125,12 @@ CorpusMappingPanel::CorpusMappingPanel(wxWindow* parent, CorpusRunPanel* run_pan
     column_grid_->CreateGrid(0, 10);
     const char* headers[] = {"启用", "Excel列", "表头", "类型", "非空", "样本", "用途", "语言", "模型/Voice", "模型状态"};
     for (int i = 0; i < 10; ++i) {
-        column_grid_->SetColLabelValue(i, wxString::FromUTF8(headers[i]));
+        column_grid_->SetColLabelValue(i, WxUtf8(headers[i]));
     }
     root->Add(column_grid_, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
     status_ = new wxStaticText(this, wxID_ANY,
-        initial_config_warning_.empty() ? wxString::FromUTF8("请选择 Excel 并读取 Sheet") : FromUtf8(initial_config_warning_));
+        runtime_.ConfigLoadMessage().empty() ? WxUtf8("请选择 Excel 并读取 Sheet") : WxUtf8(runtime_.ConfigLoadMessage()));
     root->Add(status_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
     browse_button_->Bind(wxEVT_BUTTON, &CorpusMappingPanel::OnBrowse, this);
@@ -170,8 +147,19 @@ CorpusMappingPanel::CorpusMappingPanel(wxWindow* parent, CorpusRunPanel* run_pan
     SetSizer(root);
 }
 
+void CorpusMappingPanel::BeginShutdown() {
+    if (closing_) return;
+    closing_ = true;
+    busy_ = true;
+    Disable();
+}
+
+bool CorpusMappingPanel::CanUseUi() const {
+    return !closing_ && !IsBeingDeleted();
+}
+
 void CorpusMappingPanel::OnBrowse(wxCommandEvent&) {
-    wxFileDialog dialog(this, "选择 Excel", "", "", "Excel workbook (*.xlsx)|*.xlsx", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+    wxFileDialog dialog(this, WxUtf8("选择 Excel"), wxString{}, wxString{}, WxUtf8("Excel workbook (*.xlsx)|*.xlsx"), wxFD_OPEN | wxFD_FILE_MUST_EXIST);
     if (dialog.ShowModal() == wxID_OK) {
         workbook_path_->SetValue(dialog.GetPath());
         wxCommandEvent event;
@@ -182,30 +170,35 @@ void CorpusMappingPanel::OnBrowse(wxCommandEvent&) {
 void CorpusMappingPanel::OnLoadSheets(wxCommandEvent&) {
     if (busy_) return;
     const auto path = WorkbookPath();
-    const auto last_sheet = config_.last_sheet;
+    const auto last_sheet = runtime_.ConfigSnapshot().last_sheet;
     analysis_.reset();
     FillColumnGrid();
-    SetBusy(true, "读取 Sheet 中");
-    worker_.Submit([this, path, last_sheet] {
+    SetBusy(true, WxUtf8("读取 Sheet 中"));
+    runtime_.BackgroundJobs().Submit([this, path, last_sheet](std::stop_token token) {
         try {
-            const auto sheets = workbook_service_->SheetNames(path);
+            if (token.stop_requested()) return;
+            const auto sheets = runtime_.Workbook().SheetNames(path);
+            if (token.stop_requested()) return;
             CallAfter([this, sheets, last_sheet] {
+                if (!CanUseUi()) return;
                 sheet_choice_->Clear();
                 for (const auto& name : sheets) {
-                    sheet_choice_->Append(FromUtf8(name));
+                    sheet_choice_->Append(WxUtf8(name));
                 }
                 if (!sheets.empty()) {
-                    const auto selected = last_sheet.empty() ? 0 : sheet_choice_->FindString(FromUtf8(last_sheet));
+                    const auto selected = last_sheet.empty() ? 0 : sheet_choice_->FindString(WxUtf8(last_sheet));
                     sheet_choice_->SetSelection(selected == wxNOT_FOUND ? 0 : selected);
                     wxCommandEvent event;
                     OnSheetChanged(event);
                 }
-                SetBusy(false, wxString::Format("已读取 %zu 个 Sheet", sheets.size()));
+                SetBusy(false, WxUtf8("已读取 ") + wxString::Format("%zu", sheets.size()) + WxUtf8(" 个 Sheet"));
             });
         } catch (const std::exception& ex) {
             const std::string error = ex.what();
+            runtime_.Logger().Error("workbook", error);
             CallAfter([this, error] {
-                SetBusy(false, FromUtf8(error));
+                if (!CanUseUi()) return;
+                SetBusy(false, WxUtf8(error));
             });
         }
     });
@@ -214,7 +207,7 @@ void CorpusMappingPanel::OnLoadSheets(wxCommandEvent&) {
 void CorpusMappingPanel::OnSheetChanged(wxCommandEvent&) {
     if (sheet_choice_->GetSelection() == wxNOT_FOUND) return;
     const auto identity = WorkbookService::WorkbookIdentity(WorkbookPath());
-    const auto saved_header = WorkbookService::FindHeaderRow(config_, identity, SheetName());
+    const auto saved_header = WorkbookService::FindHeaderRow(runtime_.ConfigSnapshot(), identity, SheetName());
     header_row_->SetValue(static_cast<int>(saved_header.value_or(1)));
 }
 
@@ -227,22 +220,32 @@ void CorpusMappingPanel::AnalyzeCurrentSheet() {
     const auto path = WorkbookPath();
     const auto sheet = SheetName();
     const auto header_row = static_cast<std::size_t>(header_row_->GetValue());
-    const auto config = config_;
+    const auto config = runtime_.ConfigSnapshot();
     analysis_.reset();
     FillColumnGrid();
-    SetBusy(true, "分析列中");
-    worker_.Submit([this, path, sheet, header_row, config] {
+    SetBusy(true, WxUtf8("分析列中"));
+    runtime_.BackgroundJobs().Submit([this, path, sheet, header_row, config](std::stop_token token) {
         try {
-            auto analysis = workbook_service_->AnalyzeSheet(path, sheet, header_row, config);
+            if (token.stop_requested()) return;
+            auto analysis = runtime_.Workbook().AnalyzeSheet(path, sheet, header_row, config);
+            if (token.stop_requested()) return;
             CallAfter([this, analysis = std::move(analysis)]() mutable {
+                if (!CanUseUi()) return;
                 analysis_ = std::move(analysis);
                 FillColumnGrid();
-                SetBusy(false, wxString::Format("已分析：%zu 列，%zu 行", analysis_->columns.size(), analysis_->worksheet.rows.size()));
+                SetBusy(false,
+                    WxUtf8("已分析：") +
+                    wxString::Format("%zu", analysis_->columns.size()) +
+                    WxUtf8(" 列，") +
+                    wxString::Format("%zu", analysis_->worksheet.rows.size()) +
+                    WxUtf8(" 行"));
             });
         } catch (const std::exception& ex) {
             const std::string error = ex.what();
+            runtime_.Logger().Error("workbook", error);
             CallAfter([this, error] {
-                SetBusy(false, FromUtf8(error));
+                if (!CanUseUi()) return;
+                SetBusy(false, WxUtf8(error));
             });
         }
     });
@@ -251,26 +254,26 @@ void CorpusMappingPanel::AnalyzeCurrentSheet() {
 void CorpusMappingPanel::OnBuildView(wxCommandEvent&) {
     try {
         if (!analysis_) {
-            status_->SetLabel("请先分析列");
+            status_->SetLabel(WxUtf8("请先分析列"));
             return;
         }
         CorpusViewService service;
         auto session = service.CreateSession(analysis_->worksheet.rows, SelectedColumnsFromGrid());
         run_panel_->SetSession(std::move(session));
-        status_->SetLabel("运行视图已生成");
+        status_->SetLabel(WxUtf8("运行视图已生成"));
     } catch (const std::exception& ex) {
-        status_->SetLabel(FromUtf8(ex.what()));
+        status_->SetLabel(WxUtf8(ex.what()));
     }
 }
 
 void CorpusMappingPanel::OnSaveMapping(wxCommandEvent&) {
     try {
-        if (!config_save_allowed_) {
-            status_->SetLabel("当前配置来自未来 schema，拒绝覆盖保存");
+        if (!runtime_.ConfigSaveAllowed()) {
+            status_->SetLabel(WxUtf8("当前配置来自未来 schema，拒绝覆盖保存"));
             return;
         }
         if (!analysis_) {
-            status_->SetLabel("请先分析列");
+            status_->SetLabel(WxUtf8("请先分析列"));
             return;
         }
         auto columns = analysis_->columns;
@@ -282,22 +285,30 @@ void CorpusMappingPanel::OnSaveMapping(wxCommandEvent&) {
             column.selected = it != selected.end();
             if (it != selected.end()) {
                 column.role = it->role;
-                column.language_code = it->language_code;
-                column.language_user_overridden = column.language_code != column.guessed_language;
+                const auto fixed_language = GridFixedLanguage(static_cast<int>(&column - columns.data()));
+                column.language_selection_mode = fixed_language.empty()
+                    ? LanguageSelectionMode::Auto
+                    : LanguageSelectionMode::Fixed;
+                column.language_code = column.language_selection_mode == LanguageSelectionMode::Fixed
+                    ? it->language_code
+                    : column.guessed_language;
+                column.language_user_overridden = column.language_selection_mode == LanguageSelectionMode::Fixed;
                 column.tts_engine_id = it->tts_engine_id;
                 column.tts_model_id = it->tts_model_id;
             } else {
                 column.role = ColumnRole::Ignore;
             }
         }
-        WorkbookService::UpsertMapping(config_, {analysis_->identity, analysis_->sheet_name, analysis_->worksheet.header_row, columns});
-        WorkbookService::UpsertHeaderRow(config_, analysis_->identity, analysis_->sheet_name, analysis_->worksheet.header_row);
-        config_.last_workbook = WorkbookPath();
-        config_.last_sheet = SheetName();
-        config_store_.Save(config_);
-        status_->SetLabel("映射已保存");
+        runtime_.UpdateConfig([&](AppConfig& config) {
+            WorkbookService::UpsertMapping(config, {analysis_->identity, analysis_->sheet_name, analysis_->worksheet.header_row, columns});
+            WorkbookService::UpsertHeaderRow(config, analysis_->identity, analysis_->sheet_name, analysis_->worksheet.header_row);
+            config.last_workbook = PathToUtf8(WorkbookPath());
+            config.last_sheet = SheetName();
+        });
+        runtime_.SaveConfig();
+        status_->SetLabel(WxUtf8("映射已保存"));
     } catch (const std::exception& ex) {
-        status_->SetLabel(FromUtf8(ex.what()));
+        status_->SetLabel(WxUtf8(ex.what()));
     }
 }
 
@@ -315,34 +326,36 @@ void CorpusMappingPanel::FillColumnGrid() {
     for (std::size_t r = 0; r < analysis_->columns.size(); ++r) {
         const auto& column = analysis_->columns[r];
         column_grid_->SetCellValue(static_cast<int>(r), 0, column.selected ? "1" : "");
-        column_grid_->SetCellValue(static_cast<int>(r), 1, FromUtf8(column.excel_column));
-        column_grid_->SetCellValue(static_cast<int>(r), 2, FromUtf8(column.header));
-        column_grid_->SetCellValue(static_cast<int>(r), 3, wxString::FromUTF8(TypeText(column.suggested_type)));
+        column_grid_->SetCellValue(static_cast<int>(r), 1, WxUtf8(column.excel_column));
+        column_grid_->SetCellValue(static_cast<int>(r), 2, WxUtf8(column.header));
+        column_grid_->SetCellValue(static_cast<int>(r), 3, WxUtf8(TypeText(column.suggested_type)));
         column_grid_->SetCellValue(static_cast<int>(r), 4, wxString::Format("%zu", column.non_empty_count));
         std::string sample_text;
         for (const auto& sample : column.samples) {
             if (!sample_text.empty()) sample_text += " | ";
             sample_text += sample;
         }
-        column_grid_->SetCellValue(static_cast<int>(r), 5, FromUtf8(sample_text));
-        column_grid_->SetCellValue(static_cast<int>(r), 6, wxString::FromUTF8(RoleText(column.role)));
-        column_grid_->SetCellValue(static_cast<int>(r), 7, FromUtf8(column.language_code));
-        column_grid_->SetCellValue(static_cast<int>(r), 8, FromUtf8(column.tts_model_id));
+        column_grid_->SetCellValue(static_cast<int>(r), 5, WxUtf8(sample_text));
+        column_grid_->SetCellValue(static_cast<int>(r), 6, WxUtf8(RoleText(column.role)));
+        column_grid_->SetCellValue(static_cast<int>(r), 7,
+            column.language_selection_mode == LanguageSelectionMode::Fixed ? WxUtf8(column.language_code) : WxUtf8(kAutoLanguageChoice));
+        column_grid_->SetCellValue(static_cast<int>(r), 8, WxUtf8(column.tts_model_id));
         ConfigureRowEditors(static_cast<int>(r));
         RefreshRowModelStatus(static_cast<int>(r));
         for (int c : {1, 2, 3, 4, 5, 9}) {
             column_grid_->SetReadOnly(static_cast<int>(r), c);
         }
     }
-    column_grid_->AutoSizeColumns(false);
+    const int widths[] = {55, 70, 180, 90, 70, 260, 90, 140, 260, 130};
+    for (int c = 0; c < column_grid_->GetNumberCols(); ++c) {
+        column_grid_->SetColSize(c, widths[c]);
+    }
     column_grid_->Thaw();
 }
 
-void CorpusMappingPanel::LoadModelRegistry() {
-    ModelRegistry registry(ModelsPath());
-    const auto scan = registry.ScanSherpaModelsWithDiagnostics();
-    model_entries_ = scan.entries;
-    model_invalid_ = scan.invalid;
+void CorpusMappingPanel::RefreshModelRegistry() {
+    model_entries_ = runtime_.ModelScan().entries;
+    model_invalid_ = runtime_.ModelScan().invalid;
 }
 
 void CorpusMappingPanel::SetBusy(bool busy, const wxString& message) {
@@ -369,15 +382,46 @@ void CorpusMappingPanel::ConfigureRowEditors(int row) {
     column_grid_->SetCellEditor(row, 6, new wxGridCellChoiceEditor(RoleChoices()));
     column_grid_->SetCellEditor(row, 7, new wxGridCellChoiceEditor(LanguageChoices()));
     wxArrayString models;
-    const auto language = ToUtf8(column_grid_->GetCellValue(row, 7));
-    const auto current = ToUtf8(column_grid_->GetCellValue(row, 8));
+    const auto language = EffectiveLanguageForRow(row);
+    const auto current = Utf8FromWx(column_grid_->GetCellValue(row, 8));
     for (const auto& id : ModelIdsForLanguage(language)) {
-        models.Add(FromUtf8(id));
+        models.Add(WxUtf8(id));
     }
     if (!current.empty() && !IsKnownModelForLanguage(current, language)) {
-        models.Add(FromUtf8(current));
+        models.Add(WxUtf8(current));
     }
     column_grid_->SetCellEditor(row, 8, new wxGridCellChoiceEditor(models));
+}
+
+wxArrayString CorpusMappingPanel::LanguageChoices() const {
+    std::set<std::string> codes;
+    wxArrayString values;
+    values.Add(WxUtf8(kAutoLanguageChoice));
+    for (const auto& language : ColumnAnalyzer::Languages()) {
+        if (!language.code.empty()) codes.insert(language.code);
+    }
+    for (const auto& entry : model_entries_) {
+        if (!entry.config.language_code.empty()) codes.insert(entry.config.language_code);
+    }
+    for (const auto& code : codes) {
+        values.Add(WxUtf8(code));
+    }
+    return values;
+}
+
+std::string CorpusMappingPanel::GridFixedLanguage(int row) const {
+    const auto value = Utf8FromWx(column_grid_->GetCellValue(row, 7));
+    if (value.empty() || value == kAutoLanguageChoice) return {};
+    return value;
+}
+
+std::string CorpusMappingPanel::EffectiveLanguageForRow(int row) const {
+    const auto fixed = GridFixedLanguage(row);
+    if (!fixed.empty()) return fixed;
+    if (analysis_ && row >= 0 && static_cast<std::size_t>(row) < analysis_->columns.size()) {
+        return analysis_->columns[static_cast<std::size_t>(row)].guessed_language;
+    }
+    return {};
 }
 
 std::vector<std::string> CorpusMappingPanel::ModelIdsForLanguage(const std::string& language_code) const {
@@ -399,9 +443,9 @@ bool CorpusMappingPanel::IsKnownModelForLanguage(const std::string& model_id, co
 }
 
 void CorpusMappingPanel::RefreshRowModelStatus(int row) {
-    const auto role = RoleFromText(ToUtf8(column_grid_->GetCellValue(row, 6)));
-    const auto language = ToUtf8(column_grid_->GetCellValue(row, 7));
-    const auto model_id = ToUtf8(column_grid_->GetCellValue(row, 8));
+    const auto role = RoleFromText(Utf8FromWx(column_grid_->GetCellValue(row, 6)));
+    const auto language = EffectiveLanguageForRow(row);
+    const auto model_id = Utf8FromWx(column_grid_->GetCellValue(row, 8));
     std::string status;
     if (role != ColumnRole::Play) {
         status = "";
@@ -415,27 +459,26 @@ void CorpusMappingPanel::RefreshRowModelStatus(int row) {
         });
         status = invalid == model_invalid_.end() ? "MODEL_MISSING" : "MODEL_INVALID";
     }
-    column_grid_->SetCellValue(row, 9, FromUtf8(status));
+    column_grid_->SetCellValue(row, 9, WxUtf8(status));
 }
 
 void CorpusMappingPanel::OnGridCellChanged(wxGridEvent& event) {
     const int row = event.GetRow();
     const int col = event.GetCol();
-    if (row >= 0 && (col == 6 || col == 0)) {
-        const auto role = RoleFromText(ToUtf8(column_grid_->GetCellValue(row, 6)));
+    if (row >= 0 && col == 6) {
+        const auto role = RoleFromText(Utf8FromWx(column_grid_->GetCellValue(row, 6)));
         if (role == ColumnRole::Reference) {
             column_grid_->SetCellValue(row, 0, "1");
             for (int r = 0; r < column_grid_->GetNumberRows(); ++r) {
                 if (r == row) continue;
-                if (RoleFromText(ToUtf8(column_grid_->GetCellValue(r, 6))) == ColumnRole::Reference) {
-                    column_grid_->SetCellValue(r, 6, "忽略");
+                if (Utf8FromWx(column_grid_->GetCellValue(r, 0)) == "1" &&
+                    RoleFromText(Utf8FromWx(column_grid_->GetCellValue(r, 6))) == ColumnRole::Reference) {
+                    column_grid_->SetCellValue(r, 6, WxUtf8("忽略"));
                     column_grid_->SetCellValue(r, 0, "");
                 }
             }
         } else if (role == ColumnRole::Play) {
             column_grid_->SetCellValue(row, 0, "1");
-        } else if (ToUtf8(column_grid_->GetCellValue(row, 0)) != "1") {
-            column_grid_->SetCellValue(row, 6, "忽略");
         }
     }
     if (row >= 0 && col == 7) {
@@ -455,7 +498,6 @@ void CorpusMappingPanel::OnSelectAll(wxCommandEvent&) {
 void CorpusMappingPanel::OnSelectNone(wxCommandEvent&) {
     for (int r = 0; r < column_grid_->GetNumberRows(); ++r) {
         column_grid_->SetCellValue(r, 0, "");
-        column_grid_->SetCellValue(r, 6, "忽略");
         RefreshRowModelStatus(r);
     }
 }
@@ -463,10 +505,25 @@ void CorpusMappingPanel::OnSelectNone(wxCommandEvent&) {
 void CorpusMappingPanel::OnApplyRole(wxCommandEvent&) {
     if (!batch_role_ || batch_role_->GetSelection() == wxNOT_FOUND) return;
     const auto role_text = batch_role_->GetStringSelection();
+    const auto role = RoleFromText(Utf8FromWx(role_text));
+    if (role == ColumnRole::Reference) {
+        int selected_count = 0;
+        for (int r = 0; r < column_grid_->GetNumberRows(); ++r) {
+            if (column_grid_->IsInSelection(r, 0) || column_grid_->IsInSelection(r, 6)) {
+                ++selected_count;
+            }
+        }
+        if (selected_count != 1) {
+            status_->SetLabel(WxUtf8("批量设置参考列时必须且只能选择 1 行"));
+            return;
+        }
+    }
     for (int r = 0; r < column_grid_->GetNumberRows(); ++r) {
         if (column_grid_->IsInSelection(r, 0) || column_grid_->IsInSelection(r, 6)) {
             column_grid_->SetCellValue(r, 6, role_text);
-            column_grid_->SetCellValue(r, 0, role_text == "忽略" ? "" : "1");
+            if (role != ColumnRole::Ignore) {
+                column_grid_->SetCellValue(r, 0, WxUtf8("1"));
+            }
             RefreshRowModelStatus(r);
         }
     }
@@ -478,11 +535,11 @@ std::vector<SelectedColumn> CorpusMappingPanel::SelectedColumnsFromGrid() const 
     }
     std::vector<SelectedColumn> columns;
     for (int r = 0; r < column_grid_->GetNumberRows(); ++r) {
-        const auto selected = column_grid_->GetCellValue(r, 0) == "1";
+        const auto selected = Utf8FromWx(column_grid_->GetCellValue(r, 0)) == "1";
         if (!selected) {
             continue;
         }
-        const auto role = RoleFromText(ToUtf8(column_grid_->GetCellValue(r, 6)));
+        const auto role = RoleFromText(Utf8FromWx(column_grid_->GetCellValue(r, 6)));
         if (role == ColumnRole::Ignore || role == ColumnRole::Result) {
             continue;
         }
@@ -492,9 +549,9 @@ std::vector<SelectedColumn> CorpusMappingPanel::SelectedColumnsFromGrid() const 
             profile.header,
             profile.excel_column,
             role,
-            ToUtf8(column_grid_->GetCellValue(r, 7)),
+            EffectiveLanguageForRow(r),
             "sherpa-vits",
-            ToUtf8(column_grid_->GetCellValue(r, 8)),
+            Utf8FromWx(column_grid_->GetCellValue(r, 8)),
         });
     }
     const auto reference_count = std::count_if(columns.begin(), columns.end(), [](const SelectedColumn& column) {
@@ -508,15 +565,15 @@ std::vector<SelectedColumn> CorpusMappingPanel::SelectedColumnsFromGrid() const 
     return columns;
 }
 
-std::string CorpusMappingPanel::WorkbookPath() const {
-    return ToUtf8(workbook_path_->GetValue());
+std::filesystem::path CorpusMappingPanel::WorkbookPath() const {
+    return PathFromWx(workbook_path_->GetValue());
 }
 
 std::string CorpusMappingPanel::SheetName() const {
     if (sheet_choice_->GetSelection() == wxNOT_FOUND) {
         throw std::runtime_error("尚未选择 Sheet");
     }
-    return ToUtf8(sheet_choice_->GetStringSelection());
+    return Utf8FromWx(sheet_choice_->GetStringSelection());
 }
 
 } // namespace adayo::ui

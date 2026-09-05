@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <numeric>
 #include <stdexcept>
@@ -59,7 +60,7 @@ void TestSherpaSmokeAndSwitching() {
     service.SetEngine(std::make_unique<SherpaOnnxTtsEngine>());
 
     std::cout << "P4 smoke: English speeds\n" << std::flush;
-    service.LoadModel(en.config);
+    service.EnsureModelLoaded(en.id, en.config);
     const auto slow = service.Synthesize({"Hello from Adayo corpus tool.", en.config.language_code, 0, 0.5});
     const auto normal = service.Synthesize({"Hello from Adayo corpus tool.", en.config.language_code, 0, 1.0});
     const auto fast = service.Synthesize({"Hello from Adayo corpus tool.", en.config.language_code, 0, 2.0});
@@ -70,14 +71,14 @@ void TestSherpaSmokeAndSwitching() {
     REQUIRE(normal.samples.size() > fast.samples.size());
 
     std::cout << "P4 smoke: Chinese\n" << std::flush;
-    service.LoadModel(zh.config);
+    service.EnsureModelLoaded(zh.id, zh.config);
     RequireUsableAudio(service.Synthesize({"你好，欢迎使用语料测试工具。", zh.config.language_code, 0, 1.0}));
 
     std::cout << "P4 smoke: switching\n" << std::flush;
     for (int i = 0; i < 20; ++i) {
-        service.LoadModel(en.config);
+        service.EnsureModelLoaded(en.id, en.config);
         RequireUsableAudio(service.Synthesize({"Switch to English.", en.config.language_code, 0, 1.0}));
-        service.LoadModel(zh.config);
+        service.EnsureModelLoaded(zh.id, zh.config);
         RequireUsableAudio(service.Synthesize({"切换到中文。", zh.config.language_code, 0, 1.0}));
     }
 }
@@ -90,7 +91,7 @@ void TestSherpaRepeatedGeneration() {
     const auto& zh = FindId(entries, "vits-piper-zh_CN-xiao_ya-medium-int8");
     TtsService service;
     service.SetEngine(std::make_unique<SherpaOnnxTtsEngine>());
-    service.LoadModel(en.config);
+    service.EnsureModelLoaded(en.id, en.config);
 
     const auto start = std::chrono::steady_clock::now();
     std::vector<long long> en_latencies;
@@ -109,7 +110,7 @@ void TestSherpaRepeatedGeneration() {
     PrintLatencyStats("500 English sherpa latency", std::move(en_latencies));
 
     std::cout << "P4 stress: 500 Chinese\n" << std::flush;
-    service.LoadModel(zh.config);
+    service.EnsureModelLoaded(zh.id, zh.config);
     const auto zh_start = std::chrono::steady_clock::now();
     std::vector<long long> zh_latencies;
     zh_latencies.reserve(500);
@@ -126,11 +127,57 @@ void TestSherpaRepeatedGeneration() {
     std::cout << "500 Chinese sherpa generations elapsed_ms=" << zh_elapsed << "\n";
     PrintLatencyStats("500 Chinese sherpa latency", std::move(zh_latencies));
 }
+
+void CopyDirectory(const std::filesystem::path& source, const std::filesystem::path& target) {
+    std::filesystem::create_directories(target);
+    std::filesystem::copy(source, target,
+        std::filesystem::copy_options::recursive |
+        std::filesystem::copy_options::overwrite_existing);
+}
+
+void TestSherpaUnicodePathGate() {
+    const std::filesystem::path source_root = std::filesystem::path(ADAYO_MODELS_DIR) / "sherpa";
+    const auto gate_root = std::filesystem::temp_directory_path() /
+        "公司中文工具" / "Adayo语料测试" / "模型" / "中文语音模型";
+    const auto unicode_sherpa_root = gate_root / "model" / "sherpa";
+    std::filesystem::remove_all(gate_root);
+    CopyDirectory(source_root / "vits-piper-en_US-amy-low", unicode_sherpa_root / "英文Voice目录");
+    CopyDirectory(source_root / "vits-piper-zh_CN-xiao_ya-medium-int8", unicode_sherpa_root / "中文Voice目录");
+
+    ModelRegistry registry(unicode_sherpa_root);
+    const auto entries = registry.ScanSherpaModels();
+    const auto& en = FindId(entries, "vits-piper-en_US-amy-low");
+    const auto& zh = FindId(entries, "vits-piper-zh_CN-xiao_ya-medium-int8");
+
+    TtsService service;
+    service.SetEngine(std::make_unique<SherpaOnnxTtsEngine>());
+
+    service.EnsureModelLoaded(en.id, en.config);
+    for (int i = 0; i < 20; ++i) {
+        RequireUsableAudio(service.Synthesize({"Unicode path English gate.", en.config.language_code, 0, 1.0}));
+    }
+    std::cout << "SHERPA_UNICODE_PATH_EN_PASS\n";
+
+    service.EnsureModelLoaded(zh.id, zh.config);
+    for (int i = 0; i < 20; ++i) {
+        RequireUsableAudio(service.Synthesize({"中文路径语音门禁。", zh.config.language_code, 0, 1.0}));
+    }
+    std::cout << "SHERPA_UNICODE_PATH_ZH_PASS\n";
+
+    service.EnsureModelLoaded(en.id, en.config);
+    RequireUsableAudio(service.Synthesize({"Back to English.", en.config.language_code, 0, 1.0}));
+    service.EnsureModelLoaded(zh.id, zh.config);
+    RequireUsableAudio(service.Synthesize({"再切回中文。", zh.config.language_code, 0, 1.0}));
+    service.EnsureModelLoaded(en.id, en.config);
+    RequireUsableAudio(service.Synthesize({"English again.", en.config.language_code, 0, 1.0}));
+    std::cout << "SHERPA_UNICODE_PATH_SWITCH_PASS\n";
+}
 } // namespace
 
 int main() {
     return test::RunTestMain("adayo_p4_tts_tests", [] {
         TestSherpaSmokeAndSwitching();
         TestSherpaRepeatedGeneration();
+        TestSherpaUnicodePathGate();
     });
 }

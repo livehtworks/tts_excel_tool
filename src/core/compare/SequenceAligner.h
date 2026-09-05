@@ -3,6 +3,7 @@
 #include "core/domain/Types.h"
 #include "core/compare/TextSimilarity.h"
 
+#include <cstddef>
 #include <vector>
 
 namespace adayo {
@@ -13,6 +14,8 @@ struct SequenceAlignmentOptions {
     double anchor_uniqueness_margin{5.0};
     double gap_penalty{45.0};
 };
+
+constexpr std::size_t kCompareMatrixMemoryBudgetBytes = 512ull * 1024ull * 1024ull;
 
 class SequenceAligner {
 public:

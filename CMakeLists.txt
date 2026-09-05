@@ -19,6 +19,10 @@ option(ADAYO_WITH_OPENXLSX "Enable OpenXLSX workbook reader" OFF)
 option(ADAYO_WITH_LIBXLSXWRITER "Enable libxlsxwriter exporter" OFF)
 option(ADAYO_WITH_JSON_CONFIG "Enable nlohmann-json config store" OFF)
 set(ADAYO_SHERPA_ONNX_ROOT "" CACHE PATH "Root directory of a pinned sherpa-onnx native package")
+set(ADAYO_TEST_MODELS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/dist/AdayoCorpusTool/model" CACHE PATH "Canonical accepted model root used by TTS integration tests")
+if(NOT ADAYO_TEST_MODELS_ROOT)
+    set(ADAYO_TEST_MODELS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/dist/AdayoCorpusTool/model" CACHE PATH "Canonical accepted model root used by TTS integration tests" FORCE)
+endif()
 
 if(ADAYO_BUILD_DESKTOP)
     set(ADAYO_DESKTOP_REQUIRED_OPTIONS
@@ -41,6 +45,8 @@ if(ADAYO_BUILD_DESKTOP)
 endif()
 
 add_library(adayo_core STATIC
+    src/platform/UnicodePath.cpp
+    src/platform/FileIo.cpp
     src/core/unicode/Utf8.cpp
     src/core/compare/TextNormalizer.cpp
     src/core/compare/TextSimilarity.cpp
@@ -52,6 +58,7 @@ add_library(adayo_core STATIC
     src/adapters/text/TextFileImporter.cpp
     src/services/CompareService.cpp
     src/services/CorpusViewService.cpp
+    src/services/FileLogger.cpp
     src/services/PlaybackService.cpp
     src/services/TtsService.cpp
     src/services/WorkbookService.cpp
@@ -144,14 +151,20 @@ if(ADAYO_BUILD_DESKTOP)
 
     add_executable(AdayoCorpusTool WIN32
         src/app/App.cpp
+        src/app/ApplicationRuntime.cpp
         src/ui/MainFrame.cpp
         src/ui/TtsPanel.cpp
         src/ui/CorpusMappingPanel.cpp
         src/ui/CorpusRunPanel.cpp
+        src/ui/CompareGridTable.cpp
         src/ui/ComparePanel.cpp
     )
     target_include_directories(AdayoCorpusTool PRIVATE src)
     target_link_libraries(AdayoCorpusTool PRIVATE adayo_core ${wxWidgets_LIBRARIES})
+    if(MSVC)
+        target_link_options(AdayoCorpusTool PRIVATE
+            "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/src/app/AdayoCorpusTool.exe.manifest")
+    endif()
     if(ADAYO_WITH_OPENXLSX)
         target_link_libraries(AdayoCorpusTool PRIVATE adayo_excel_reader)
     endif()
@@ -223,7 +236,7 @@ if(ADAYO_BUILD_TESTS)
         add_executable(adayo_p4_tts_tests tests/p4_tts_tests.cpp)
         target_link_libraries(adayo_p4_tts_tests PRIVATE adayo_core adayo_persistence adayo_sherpa_adapter)
         target_compile_definitions(adayo_p4_tts_tests PRIVATE
-            ADAYO_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models")
+            ADAYO_MODELS_DIR="${ADAYO_TEST_MODELS_ROOT}")
         add_custom_command(TARGET adayo_p4_tts_tests POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${ADAYO_SHERPA_ONNX_LIB_DIR}/sherpa-onnx-c-api.dll"

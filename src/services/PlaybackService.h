@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -28,16 +29,26 @@ struct PlaybackItem {
     std::size_t column_index{};
 };
 
+struct PlaybackRequest {
+    std::string model_id;
+    TtsModelConfig model_config;
+    std::vector<PlaybackItem> items;
+    std::chrono::milliseconds interval{};
+    double speed{1.0};
+};
+
 class PlaybackService {
 public:
-    PlaybackService(TtsService& tts, IAudioPlayer& player);
+    using ErrorHandler = std::function<void(const std::string&)>;
+
+    PlaybackService(TtsService& tts, IAudioPlayer& player, ErrorHandler on_error = {});
     ~PlaybackService();
 
-    void PlayOne(TtsRequest request);
-    void PlaySequence(std::vector<PlaybackItem> items, std::chrono::milliseconds interval, double speed);
+    void Play(PlaybackRequest request);
     void Pause();
     void Resume();
     void Stop();
+    void Shutdown();
 
     PlaybackState State() const;
     std::string LastError() const;
@@ -48,7 +59,7 @@ public:
 private:
     void SetState(PlaybackState state);
     void SetError(std::string error);
-    void RunSequence(std::vector<PlaybackItem> items, std::chrono::milliseconds interval, std::uint64_t generation);
+    void RunSequence(PlaybackRequest request, std::uint64_t generation);
     bool IsCanceled(std::uint64_t generation) const;
     bool WaitWhilePaused(std::uint64_t generation);
     void FinishCanceledIfCurrentStop(std::uint64_t generation);
@@ -56,6 +67,7 @@ private:
 
     TtsService& tts_;
     IAudioPlayer& player_;
+    ErrorHandler on_error_;
     WorkerQueue worker_;
     mutable std::mutex mutex_;
     mutable std::condition_variable cv_;
