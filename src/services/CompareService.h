@@ -10,14 +10,13 @@
 
 namespace adayo {
 
-struct CompareOptions {
-    NormalizerOptions normalizer;
-    SequenceAlignmentOptions alignment;
-    double pass_threshold{100.0};
-};
-
 class CompareService {
 public:
+    static CompareOptions Preset(std::string_view profile);
+    static void ValidateOptions(const CompareOptions& options);
+    static std::string MetricId(CompareMetric metric);
+    static std::string ValueLabel(CompareMetric metric);
+    static EditStatistics Totals(const std::vector<CompareRow>& rows);
     std::vector<CompareRow> Compare(
         const std::vector<std::string>& reference,
         const std::vector<std::string>& actual,

@@ -54,8 +54,8 @@ ScoreMatrix BuildScores(const std::vector<TextRecord>& ref,
                         const std::vector<TextRecord>& act,
                         const TextSimilarity& sim, CompareExecutionContext& context) {
     std::vector<std::u32string> left,right;
-    for(const auto& record:ref) { context.Check(); left.push_back(unicode::DecodeStrict(record.normalized_text)); }
-    for(const auto& record:act) { context.Check(); right.push_back(unicode::DecodeStrict(record.normalized_text)); }
+    for(const auto& record:ref) { context.Check(); left.push_back(record.normalized_codepoints.empty() ? unicode::DecodeStrict(record.normalized_text) : record.normalized_codepoints); }
+    for(const auto& record:act) { context.Check(); right.push_back(record.normalized_codepoints.empty() ? unicode::DecodeStrict(record.normalized_text) : record.normalized_codepoints); }
     for(const auto& text:left) if(text.size()>CompareExecutionContext::record_codepoints) throw std::runtime_error("Normalized record exceeds 65536 codepoints");
     for(const auto& text:right) if(text.size()>CompareExecutionContext::record_codepoints) throw std::runtime_error("Normalized record exceeds 65536 codepoints");
     ScoreMatrix scores(ref.size(), std::vector<double>(act.size(), 0.0));

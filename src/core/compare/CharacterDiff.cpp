@@ -10,9 +10,11 @@ void Append(std::vector<DiffFragment>& fragments,char32_t cp,DiffKind kind) {
 }
 }
 CharacterDiffResult CharacterDiff::Diff(std::string_view reference_utf8,std::string_view actual_utf8,CompareExecutionContext* context) const {
+    return Diff(std::u32string_view(unicode::DecodeStrict(reference_utf8)),std::u32string_view(unicode::DecodeStrict(actual_utf8)),context);
+}
+CharacterDiffResult CharacterDiff::Diff(std::u32string_view a,std::u32string_view b,CompareExecutionContext* context) const {
     CompareExecutionContext local; if(!context) context=&local; context->Check();
-    auto strings=context->Reserve(CompareExecutionContext::Multiply(CompareExecutionContext::Add(reference_utf8.size(),actual_utf8.size()),16),"Diff Unicode and output");
-    const auto a=unicode::DecodeStrict(reference_utf8),b=unicode::DecodeStrict(actual_utf8);
+    auto strings=context->Reserve(CompareExecutionContext::Multiply(CompareExecutionContext::Add(a.size(),b.size()),64),"Diff Unicode and output");
     if(a.size()>CompareExecutionContext::record_codepoints || b.size()>CompareExecutionContext::record_codepoints) throw std::runtime_error("Diff record exceeds 65536 codepoints");
     CharacterDiffResult result;
     std::size_t prefix=0,suffix=0;

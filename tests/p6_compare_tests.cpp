@@ -353,9 +353,95 @@ void TestCompareBudgetAndCancellation() {
     REQUIRE(measured.used_bytes==8ull*1024*1024); REQUIRE(measured.peak_bytes>measured.used_bytes); REQUIRE(measured.peak_bytes<=CompareExecutionContext::budget_bytes);
 }
 
+void TestFourProfiles() {
+    CompareService service;
+    const auto strict=CompareService::Preset("strict_rows_v1");
+    auto rows=service.Compare({"abc","","x"},{"ab","","totally different"},strict);
+    REQUIRE(rows.size()==3); REQUIRE(rows[0].status==CompareStatus::Ng);
+    REQUIRE(std::abs(rows[0].similarity-200.0/3)<1e-9);
+    REQUIRE(rows[1].status==CompareStatus::Ok); REQUIRE(rows[2].status==CompareStatus::Ng);
+    REQUIRE(service.Compare({"a","b"},{"a"},strict)[1].status==CompareStatus::Missing);
+    REQUIRE(service.Compare({"a","b"},{"a",""},strict)[1].status==CompareStatus::Ng);
+    REQUIRE(service.Compare({"-1"},{"1"},strict)[0].status==CompareStatus::Ng);
+    REQUIRE(service.Compare({"e\xCC\x81"},{"é"},strict)[0].status==CompareStatus::Ng);
+    auto joined=[](const auto& fragments){std::string out;for(const auto& f:fragments) out+=f.text;return out;};
+    for(const auto& row:rows) {
+        REQUIRE(joined(row.diff.reference_fragments)==row.reference_text);
+        REQUIRE(joined(row.diff.actual_fragments)==row.actual_text);
+    }
+#ifdef ADAYO_HAS_UTF8PROC
+    const auto cer=CompareService::Preset("asr_cer_v1");
+    const auto total=CompareService::Totals(service.Compare({"a","123456789"},{"b","123456789"},cer));
+    REQUIRE(total.reference_units==10); REQUIRE(std::abs(*total.ErrorRate()-0.1)<1e-9);
+    auto relaxed=cer; relaxed.max_error_rate=3;
+    REQUIRE(service.Compare({"a"},{"aaaa"},relaxed)[0].status==CompareStatus::Ok);
+    REQUIRE(!service.Compare({""},{"abc"},relaxed)[0].error_rate);
+    REQUIRE(service.Compare({""},{"abc"},relaxed)[0].status==CompareStatus::Ng);
+    const auto tie=service.Compare({"ab"},{"ba"},cer)[0].edits;
+    REQUIRE(tie.substitutions==2); REQUIRE(tie.deletions==0); REQUIRE(tie.insertions==0);
+    REQUIRE(service.Compare({"-1"},{"1"},CompareService::Preset("legacy_v1"))[0].status==CompareStatus::Ok);
+#endif
+#ifdef ADAYO_HAS_JSON_CONFIG
+    if(const auto* environment=std::getenv("ADAYO_REVIEW_WORKPACK")) {
+        std::ifstream input(PathFromUtf8(environment)/"fixtures"/"compare_cases.json");
+        const auto fixtures=nlohmann::json::parse(input);
+        for(const auto& c:fixtures.at("score_cases")) {
+            const auto row=service.Compare({c.at("left")},{c.at("right")},strict)[0];
+            REQUIRE(std::abs(row.similarity-c.at("levenshtein_similarity").get<double>())<1e-9);
+        }
+#ifdef ADAYO_HAS_UTF8PROC
+        for(const auto& c:fixtures.at("metric_cases")) {
+            const auto row=service.Compare({c.at("left")},{c.at("right")},CompareService::Preset(c.at("profile").get<std::string>()))[0];
+            const auto& e=c.at("expected");
+            REQUIRE(row.edits.substitutions==e.at("S").get<std::size_t>());
+            REQUIRE(row.edits.deletions==e.at("D").get<std::size_t>());
+            REQUIRE(row.edits.insertions==e.at("I").get<std::size_t>());
+            REQUIRE(row.edits.reference_units==e.at("N").get<std::size_t>());
+            if(e.at("error_rate").is_null()) REQUIRE(!row.error_rate);
+            else { REQUIRE(row.error_rate); REQUIRE(std::abs(*row.error_rate-e.at("error_rate").get<double>())<1e-9); }
+            REQUIRE(joined(row.diff.reference_fragments)==row.reference_text);
+            REQUIRE(joined(row.diff.actual_fragments)==row.actual_text);
+        }
+#endif
+        for(const auto& c:fixtures.at("alignment_cases")) {
+            auto options=SupportedMathOptions();
+            if(c.at("mode")=="rows") options=CompareService::Preset("strict_rows_v1");
+            options.alignment.alignment_threshold=c.value("alignment_threshold",80.0);
+            options.alignment.anchor_threshold=c.value("anchor_threshold",95.0);
+            const auto output=service.Compare(c.at("reference").get<std::vector<std::string>>(),c.at("actual").get<std::vector<std::string>>(),options);
+            nlohmann::json pairs=nlohmann::json::array();
+            for(const auto& row:output) {
+                nlohmann::json pair=nlohmann::json::array();
+                pair.push_back(row.reference_index?nlohmann::json(*row.reference_index):nlohmann::json(nullptr));
+                pair.push_back(row.actual_index?nlohmann::json(*row.actual_index):nlohmann::json(nullptr));
+                pairs.push_back(pair);
+            }
+            if(c.contains("expected_pairs")) REQUIRE(pairs==c.at("expected_pairs"));
+            if(c.contains("expected_unordered_pair_set")) {
+                auto expected=c.at("expected_unordered_pair_set");
+                std::sort(pairs.begin(),pairs.end());std::sort(expected.begin(),expected.end());
+                REQUIRE(pairs==expected);
+            }
+            AssertUniqueIndexes(output);
+            if(c.contains("invariants")) {
+                std::optional<std::size_t> r,a; std::size_t matches=0;
+                for(const auto& row:output) {
+                    if(row.reference_index) { if(r) REQUIRE(*r<*row.reference_index); r=row.reference_index; }
+                    if(row.actual_index) { if(a) REQUIRE(*a<*row.actual_index); a=row.actual_index; }
+                    if(row.reference_index && row.actual_index) ++matches;
+                }
+                REQUIRE(matches<2);
+            }
+        }
+        std::cout<<"PASS external comparison goldens\n";
+    }
+#endif
+}
+
 int main() {
     return test::RunTestMain("adayo_p6_compare_tests", [] {
         TestStrictImportAndIndelGoldens();
+        TestFourProfiles();
         TestCompareBudgetAndCancellation();
         TestFixedAlignmentSet();
         TestPunctuationSwitch();

@@ -1,6 +1,7 @@
 #include "ui/CompareGridTable.h"
 
 #include "ui/UiString.h"
+#include "services/CompareService.h"
 
 #include <algorithm>
 #include <utility>
@@ -58,7 +59,11 @@ wxString CompareGridTable::GetValue(int row, int col) {
     switch (offset) {
         case 0: return WxUtf8(item.reference_text);
         case 1: return WxUtf8(item.actual_text);
-        case 2: return wxString::Format("%.2f", item.similarity);
+        case 2:
+            if(item.metric==CompareMetric::Cer || item.metric==CompareMetric::Wer)
+                return item.error_rate?wxString::Format("%.2f",*item.error_rate*100):
+                    WxUtf8("N=0，未定义；插入"+std::to_string(item.edits.insertions));
+            return wxString::Format("%.2f", item.similarity);
         case 3: return WxUtf8(StatusText(item.status));
     }
     return {};
@@ -71,7 +76,7 @@ wxString CompareGridTable::GetColLabelValue(int col) {
     const auto group_index = static_cast<std::size_t>(col / 4);
     if (group_index >= reports_->size()) return {};
     const auto prefix = (*reports_)[group_index].label;
-    const auto suffix = ColumnSuffix(col % 4);
+    const auto suffix = col%4==2?CompareService::ValueLabel((*reports_)[group_index].options.metric):std::string(ColumnSuffix(col%4));
     if (prefix.empty()) return WxUtf8(suffix);
     return WxUtf8(prefix + " " + suffix);
 }

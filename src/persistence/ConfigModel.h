@@ -24,6 +24,7 @@ struct SheetMappingConfig {
 struct AppConfig {
     int schema_version{4};
     AudioCacheOptions audio_cache;
+    CompareOptions compare;
     std::string last_workbook;
     std::string last_sheet;
     double speech_rate{1.0};

@@ -2,6 +2,7 @@
 
 #include "platform/UnicodePath.h"
 #include "platform/FileIo.h"
+#include "services/CompareService.h"
 #include <mutex>
 
 #include <chrono>
@@ -62,16 +63,6 @@ std::filesystem::path CorruptBackupPath(const std::filesystem::path& path) {
         candidate += ".corrupt-" + Timestamp() + "-" + std::to_string(suffix++);
     }
     return candidate;
-}
-
-void AtomicReplace(const std::filesystem::path& temp, const std::filesystem::path& final) {
-#ifdef _WIN32
-    if (!MoveFileExW(temp.wstring().c_str(), final.wstring().c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        throw std::runtime_error("原子替换配置失败: " + std::to_string(GetLastError()));
-    }
-#else
-    std::filesystem::rename(temp, final);
-#endif
 }
 
 void RejectUnsafeExistingTarget(const std::filesystem::path& path) {
@@ -214,8 +205,18 @@ void from_json(const json& j, SheetMappingConfig& mapping) {
 
 void to_json(json& j, const AppConfig& config) {
     ValidateCacheConfig(config.audio_cache);
+    CompareService::ValidateOptions(config.compare);
+    const auto& c=config.compare;
     j = json{
         {"schema_version", kCurrentSchemaVersion},
+        {"compare", {{"profile_id",c.profile_id},{"custom",c.custom},{"metric_id",CompareService::MetricId(c.metric)},
+            {"pairing",c.pairing==CompareAlignment::Rows?"rows":"sequence"},{"delimiter",c.delimiter},
+            {"normalization",c.normalizer.normalization==UnicodeNormalization::None?"None":c.normalizer.normalization==UnicodeNormalization::Nfc?"NFC":"NFKC"},
+            {"case_fold",c.normalizer.case_fold},{"ignore_punctuation",c.normalizer.ignore_punctuation},
+            {"collapse_whitespace",c.normalizer.collapse_whitespace},{"trim",c.normalizer.trim},
+            {"alignment_threshold",c.alignment.alignment_threshold},{"anchor_threshold",c.alignment.anchor_threshold},
+            {"anchor_uniqueness_margin",c.alignment.anchor_uniqueness_margin},{"gap_penalty",c.alignment.gap_penalty},
+            {"pass_threshold",c.pass_threshold},{"max_error_rate",c.max_error_rate}}},
         {"audio_cache", {{"enabled",config.audio_cache.enabled},{"memory_limit_bytes",config.audio_cache.memory_limit_bytes},
             {"disk_limit_bytes",config.audio_cache.disk_limit_bytes},{"entry_limit",config.audio_cache.entry_limit}}},
         {"last_workbook", config.last_workbook},
@@ -249,6 +250,41 @@ void from_json(const json& j, AppConfig& config) {
     config.speech_rate = j.value("speech_rate", 1.0);
     config.alignment_threshold = j.value("alignment_threshold", 80.0);
     config.pass_threshold = j.value("pass_threshold", 100.0);
+    try {
+        config.compare=CompareService::Preset("legacy_v1");
+        config.compare.alignment.alignment_threshold=config.alignment_threshold;
+        config.compare.pass_threshold=config.pass_threshold;
+        if(j.contains("compare")) {
+            const auto& v=j.at("compare");
+            auto& c=config.compare;
+            c=CompareService::Preset(v.at("profile_id").get<std::string>());
+            if(v.at("metric_id").get<std::string>()!=CompareService::MetricId(c.metric))
+                throw ConfigValidationError("Compare metric/profile mismatch");
+            const auto pairing=v.at("pairing").get<std::string>();
+            if(pairing!="rows" && pairing!="sequence") throw ConfigValidationError("Unknown compare pairing");
+            c.pairing=pairing=="rows"?CompareAlignment::Rows:CompareAlignment::Sequence;
+            const auto norm=v.at("normalization").get<std::string>();
+            if(norm!="None" && norm!="NFC" && norm!="NFKC") throw ConfigValidationError("Unknown compare normalization");
+            c.normalizer.normalization=norm=="None"?UnicodeNormalization::None:norm=="NFC"?UnicodeNormalization::Nfc:UnicodeNormalization::Nfkc;
+            c.normalizer.case_fold=v.at("case_fold").get<bool>();
+            c.normalizer.ignore_punctuation=v.at("ignore_punctuation").get<bool>();
+            c.normalizer.collapse_whitespace=v.at("collapse_whitespace").get<bool>();
+            c.normalizer.trim=v.at("trim").get<bool>();
+            c.alignment.alignment_threshold=v.at("alignment_threshold").get<double>();
+            c.alignment.anchor_threshold=v.at("anchor_threshold").get<double>();
+            c.alignment.anchor_uniqueness_margin=v.at("anchor_uniqueness_margin").get<double>();
+            c.alignment.gap_penalty=v.at("gap_penalty").get<double>();
+            c.pass_threshold=v.at("pass_threshold").get<double>();
+            c.max_error_rate=v.at("max_error_rate").get<double>();
+            c.delimiter=v.at("delimiter").get<std::string>();
+            c.custom=v.at("custom").get<bool>();
+        }
+        CompareService::ValidateOptions(config.compare);
+        auto expected=CompareService::Preset(config.compare.profile_id);
+        auto actual=config.compare;
+        actual.custom=false;
+        config.compare.custom=actual!=expected;
+    } catch(const std::exception& ex) { throw ConfigValidationError(ex.what()); }
     config.sheet_header_rows = j.value("sheet_header_rows", std::vector<SheetHeaderRowConfig>{});
     config.sheet_mappings = j.value("sheet_mappings", std::vector<SheetMappingConfig>{});
     if (schema_version < 2) {

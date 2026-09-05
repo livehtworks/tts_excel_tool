@@ -40,6 +40,39 @@ enum class DiffKind {
     Same,
     Changed,
 };
+enum class UnicodeNormalization { None, Nfc, Nfkc };
+struct NormalizerOptions {
+    UnicodeNormalization normalization{UnicodeNormalization::Nfkc};
+    bool case_fold{true}, collapse_whitespace{true}, trim{true}, ignore_punctuation{false};
+    bool operator==(const NormalizerOptions&) const = default;
+};
+struct SequenceAlignmentOptions {
+    double alignment_threshold{80.0}, anchor_threshold{95.0}, anchor_uniqueness_margin{5.0}, gap_penalty{45.0};
+    bool operator==(const SequenceAlignmentOptions&) const = default;
+};
+enum class CompareMetric { Indel, Exact, Cer, Wer };
+enum class CompareAlignment { Sequence, Rows };
+struct CompareOptions {
+    NormalizerOptions normalizer{UnicodeNormalization::Nfkc,true,true,true,true};
+    SequenceAlignmentOptions alignment;
+    double pass_threshold{100.0};
+    std::string profile_id{"legacy_v1"};
+    CompareMetric metric{CompareMetric::Indel};
+    CompareAlignment pairing{CompareAlignment::Sequence};
+    double max_error_rate{0.0};
+    bool custom{false};
+    std::string delimiter;
+    bool operator==(const CompareOptions&) const = default;
+};
+struct EditStatistics {
+    std::size_t substitutions{}, deletions{}, insertions{}, reference_units{};
+    std::optional<double> ErrorRate() const {
+        const auto errors=substitutions+deletions+insertions;
+        if(reference_units) return static_cast<double>(errors)/static_cast<double>(reference_units);
+        return errors ? std::nullopt : std::optional<double>{0.0};
+    }
+};
+struct TextInputSource { std::string path, sha256; };
 
 struct LanguageOption {
     std::string code;
@@ -125,6 +158,7 @@ struct TextRecord {
     std::size_t source_index{};
     std::string raw_text;
     std::string normalized_text;
+    std::u32string raw_codepoints, normalized_codepoints;
 };
 
 struct DiffFragment {
@@ -151,11 +185,18 @@ struct CompareRow {
     double similarity{};
     CompareStatus status{CompareStatus::Ng};
     CharacterDiffResult diff;
+    CompareMetric metric{CompareMetric::Indel};
+    EditStatistics edits;
+    std::optional<double> error_rate;
+    std::size_t reference_length{}, actual_length{};
 };
 
 struct CompareReportGroup {
     std::string label;
     std::vector<CompareRow> rows;
+    CompareOptions options;
+    TextInputSource reference_source, actual_source;
+    EditStatistics totals;
 };
 
 struct AudioBuffer {

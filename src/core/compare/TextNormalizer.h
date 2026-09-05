@@ -2,17 +2,9 @@
 
 #include <string>
 #include <string_view>
+#include "core/domain/Types.h"
 
 namespace adayo {
-enum class UnicodeNormalization { None, Nfc, Nfkc };
-
-struct NormalizerOptions {
-    UnicodeNormalization normalization{UnicodeNormalization::Nfkc};
-    bool case_fold{true};
-    bool collapse_whitespace{true};
-    bool trim{true};
-    bool ignore_punctuation{false};
-};
 
 class TextNormalizer {
 public:

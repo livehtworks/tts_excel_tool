@@ -2,6 +2,7 @@
 #include "core/workbook/ColumnAnalyzer.h"
 #include "core/workbook/ViewBuilder.h"
 #include "persistence/JsonConfigStore.h"
+#include "services/CompareService.h"
 #include "services/CorpusViewService.h"
 #include "services/ModelRegistry.h"
 #include "services/WorkbookService.h"
@@ -632,6 +633,18 @@ int main() {
             WriteBinaryFile(root/"config.json",old.data(),old.size());
             JsonConfigStore store(root/"config.json"); auto migrated=store.Load();
             REQUIRE(migrated.schema_version==4); REQUIRE(migrated.speech_rate==1.4); REQUIRE(migrated.alignment_threshold==83); REQUIRE(migrated.pass_threshold==99);
+            REQUIRE(migrated.compare.profile_id=="legacy_v1");
+            REQUIRE(migrated.compare.alignment.alignment_threshold==83); REQUIRE(migrated.compare.pass_threshold==99);
+            for(const auto* profile:{"legacy_v1","strict_rows_v1","asr_cer_v1","asr_wer_v1"}) {
+                migrated.compare=CompareService::Preset(profile);
+                migrated.compare.custom=true;
+                migrated.compare.delimiter="||";
+                migrated.compare.alignment.anchor_uniqueness_margin=8;
+                migrated.compare.max_error_rate=2.5;
+                store.Save(migrated);
+                REQUIRE(store.Load().compare==migrated.compare);
+                REQUIRE(store.Load().alignment_threshold==83);
+            }
             REQUIRE(migrated.audio_cache.enabled); REQUIRE(migrated.audio_cache.disk_limit_bytes==2147483648ull);
             store.Save(migrated); REQUIRE(store.Load().speech_rate==1.4);
             const std::string bad=R"({"schema_version":4,"audio_cache":{"disk_limit_bytes":0}})";

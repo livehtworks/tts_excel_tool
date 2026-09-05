@@ -17,6 +17,11 @@ std::string ApplyUnicodeMap(std::string_view raw, const NormalizerOptions& optio
     throw std::runtime_error("UNSUPPORTED_UNICODE: normalization/casefold requires utf8proc");
 #endif
 #ifdef ADAYO_HAS_UTF8PROC
+    std::string composed;
+    if(options.case_fold && options.normalization==UnicodeNormalization::Nfc) {
+        auto before=options; before.case_fold=false;
+        composed=ApplyUnicodeMap(raw,before); raw=composed;
+    }
     utf8proc_uint8_t* mapped = nullptr;
     utf8proc_option_t flags = UTF8PROC_STABLE;
     if(options.normalization!=UnicodeNormalization::None) flags=static_cast<utf8proc_option_t>(flags|UTF8PROC_COMPOSE);
