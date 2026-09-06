@@ -61,6 +61,43 @@ statuses are not upgraded by R2 tests. Historical ENV-02 evidence remains missin
 
 These are subcase results, not full-item or overall acceptance:
 
+- F11 observes the existing F10 executable without changing production code.
+  SAFE02-A passes: reference F2 receives the copied multiline cache diagnostics
+  while preserving the original four-line suffix, English G2 gains the prefix
+  `R2 F11 edit. `, and its result is marked OK. Both Close and Generate prompt;
+  Cancel preserves the edited values, result, G2 result selection/source details,
+  and 1-47 range. Cancelling the save path after export-then-close also retains
+  the session and does not close. This closes only the path-cancel part of
+  SAFE02-C; GUI export failure remains unverified.
+  SAFE02-D passes: accepting unchanged F2 text and regenerating does not prompt;
+  F9 playback-only close also did not prompt. Export-then-close on F10 creates
+  `native/ui-f11/edited-runtime-close.xlsx` before controlled exit. Production
+  OpenXlsxWorkbookReader readback reconstructs the exact three effective GUI
+  edits from the untouched original and compares all 47x8 cells plus 376 source
+  mappings. Independent ZIP/XML checks confirm copied text, exactly one result,
+  source hash and owner coordinates. Export SHA256:
+  `57e2edf354e43f688b94f363f04f7d79b7ada9b40210019afe8aa91a64aa8fb8`.
+  Commands/expected values are in external `native/ui-f11/readback.cpp`,
+  `build-readback.cmd`, `check-xml.ps1`; results are `native-readback.log` and
+  `xml-readback.log`. Screenshots in that directory retain each prompt/cancel
+  and the actual detail-copy roundtrip. F10 shutdown logs record joined workers
+  before native window destruction; this is not active-native cancellation.
+  F11 targeted Release regression passes 6/6 in 8.03 seconds, excluding only
+  the unchanged long P4 suite already exercised by F5; full output is retained
+  in `native/stage-f11-targeted-tests.log`.
+- F11 actual paused-playback clear on F9: 45 managed entries are removed with
+  zero failures, memory ownership drops from 5760372 to zero, and the paused
+  device's 43008-byte external lease remains alive. Owner-only disk usage is 47
+  bytes, dirty records drop from 7 to zero and config bytes remain unchanged.
+  Resume completes the retained item and synthesizes subsequent items. The log
+  records request 2/item 6 as a memory hit with zero load/synthesis, followed by
+  item 7/8 synthesis. Its 96833.8821 ms completion includes the deliberate pause,
+  not a hot-cache latency sample. No new loopback recording is claimed. Queued,
+  generating, partial-delete-failure and quota-shrink device combinations remain
+  unverified; neither UI02-C nor CACHE03-B is promoted. Evidence:
+  `native/ui-f11/{paused-before-clear,lease-after-clear,resume-after-clear,next-item-after-clear}-*.jpg`
+  and `native/app-f9-full/logs/AdayoCorpusTool_20260907.log`.
+
 - F9 GUI closes UI02-A/D. A real Windows read-sharing handle without DELETE
   sharing on the isolated config causes atomic replacement to fail. Unapplied
   quota 2049 leaves the 2048 MiB effective limit and config bytes unchanged;
@@ -85,8 +122,10 @@ These are subcase results, not full-item or overall acceptance:
   `native/stage-f10-core-build.log`, `native/stage-f10-core-tests.log`.
   Built EXE `native/app-f10-full/AdayoCorpusTool.exe`, SHA256
   `36F00190E086816B8BEAEB86F780FD1950EBAE99EF9230A59D2B422D957C6993`.
-  Its detail-dialog visual/copy check remains unverified after actual desktop
-  input interrupted automation. The F9 screenshots are not F10 dialog evidence.
+  F11 verifies the actual F10 dialog fits its parent, wraps the full cache path
+  without ellipsis, and copies all diagnostics into the real multiline editor.
+  Exact readback from the subsequently exported GUI session confirms no path or
+  text loss. This is one observed window size, not the full DPI matrix.
 
 - F8 comparison GUI and OOXML readback close UI04-A/C, UI05-A/B/C and
   UI06-B/C. F1 two-group exports retain both groups and all three sheets when
@@ -268,13 +307,13 @@ These are subcase results, not full-item or overall acceptance:
   layout. Expanded and re-collapsed screenshots retain a nonzero result grid
   at the same 1898x1219 window size (`native/ui-d7/compare-*.jpg`).
 
-The F10 protected-file after manifest matches all 758 before records (bytes, SHA256
+The F11 protected-file after manifest matches all 758 before records (bytes, SHA256
 and file identity), covering the scoped canonical program/models and original
-workbook (`protection-after-f10.log`). Historical whole-backup evidence is not inferred.
+workbook (`protection-after-f11.log`). Historical whole-backup evidence is not inferred.
 Remaining full-item evidence includes full GUI/DPI/device/lifecycle and composite
 cache matrices. `acceptance_results.json` in the private evidence root records
 individual work-package assertions separately from the partial native/GUI results.
-The reconciled assertion snapshot is 31 PASS / 27 NOT_RUN. Each NOT_RUN now names
+The reconciled assertion snapshot is 33 PASS / 25 NOT_RUN. Each NOT_RUN now names
 its specific missing combination or unresolved measurement; it is not a generic
 claim that source work or tools are blocked. NOT_RUN denotes an
 unproven complete assertion, even where individual subcases have passed. E5
@@ -298,12 +337,11 @@ snapshot. Do not regenerate the protection-before baseline.
 
 Active desktop input interrupted E1 GUI automation; that session was not discarded
 or forcibly terminated by the agent. It was absent when this continuation resumed.
-F1/F5/F6/F7/F8 windows closed normally; F9 is the latest observed isolated process.
-Its close attempt was interrupted by detected user input; it was left open.
-F10 is rebuilt separately but its new cache detail dialog has not been visually
-verified. No automated desktop input continued after re-observing the interruption.
+F1/F5/F6/F7/F8/F9/F10 windows closed normally. F11 desktop automation paused on
+detected user input and resumed after explicit user confirmation. F10's edited
+session was exported before closing, and its detail dialog was visually checked.
 Remaining acceptance
-includes the complete dirty/export-leave flow, actual playback/pause/live-clear
+includes export-failure leave protection, the complete playback/pause/live-clear
 matrix, full registry and multi-group interaction, DPI, and all long-task close
 cases. Actual `window_destroyed` instrumentation now exists, with idle and paused
 close evidence. The active-native four-phase trace still needs verification;

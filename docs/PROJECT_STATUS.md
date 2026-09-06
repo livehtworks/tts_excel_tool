@@ -35,9 +35,15 @@ Current phase: R2 safety/interaction/cache source handoff with incomplete compos
   MiB. The error previously vanished on playback timer refresh; it now persists
   through synthesis/playback/pause until a successful Apply. F10 additionally
   replaces the path-truncating cache message box with a scrollable read-only
-  detail dialog and exposes the actual cache root. Its GUI visual check remains
-  pending after desktop user input interrupted automation. F9 remains open and
-  was not forcibly closed. Current assertions: 31 PASS / 27 NOT_RUN, not R2 PASS.
+  detail dialog and exposes the actual cache root. F11 verifies its full-path
+  display and real copy/paste roundtrip. Actual paused-device clear removes all
+  45 entries with no failed deletes, preserves the 43008-byte lease and config,
+  then resumes playback. F10 GUI also verifies edited-reference/play/result
+  close and regenerate cancellation, save-dialog cancellation, and successful
+  export-then-close. Production-reader and independent XML readback match the
+  complete 47x8 edited snapshot and source identities. SAFE02-A/D now pass;
+  export-failure leave protection remains unverified. Both F9 and F10 closed
+  normally. Current assertions: 33 PASS / 25 NOT_RUN, not R2 PASS.
   Latest rebuilt program: external `native/app-f10-full/AdayoCorpusTool.exe`;
   targeted Release passes 6/6 in 8.84 seconds and Core 4/4 in 4.90 seconds.
   Protected-file recheck matches all 758 scoped records. No established runtime
@@ -97,4 +103,4 @@ Current phase: R2 safety/interaction/cache source handoff with incomplete compos
 - Pending user verification: human listening; the full cold/warm playback/control/close and live clear matrix; rapid file/sheet/header changes; multi-language edit/range/cursor combinations; close/cancel/reopen during background work. Automated portions of these composite cases are documented separately, not promoted to full PASS.
 - Arabic/Spanish resource blockers are resolved by preparing the already downloaded weights; no voice substitution or bulk redownload was performed. New language listening/business acceptance and actual ASR accuracy remain NOT_RUN where recognizer output or human assessment has not been supplied.
 - Evidence limitation: original workbook preflight hash and isolated review/model/junction protections passed, but no full pre-task hash inventory of all established production/backup files was recorded. This cannot be reconstructed retrospectively.
-- The previous source handoff was committed/pushed as `5b7bee0`. The latest request authorizes the R2 source commit/push, but not established runtime replacement. Baseline/final builds and application directories are isolated outside the repository. No user-owned running review process is stopped. E1 automation was interrupted without discarding its session; it was no longer present when this continuation resumed. F1/F5/F6/F7/F8 windows closed normally; F9 is the latest observed isolated GUI process, while F10 is the newest build.
+- The previous source handoff was committed/pushed as `5b7bee0`. The latest request authorizes the R2 source commit/push, but not established runtime replacement. Baseline/final builds and application directories are isolated outside the repository. No user-owned running review process is stopped. E1 automation was interrupted without discarding its session; it was no longer present when this continuation resumed. F1/F5/F6/F7/F8/F9/F10 windows closed normally. F10 is the newest build; its edited session was exported before closing, with independent readback evidence in `native/ui-f11`.
