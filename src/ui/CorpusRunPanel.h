@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 #include <functional>
 
@@ -71,6 +72,7 @@ private:
     wxTextCtrl* cell_details_{};
     std::optional<std::pair<int,int>> highlighted_cell_;
     bool cache_busy_{};
+    std::string cache_settings_error_;
 
     ApplicationRuntime& runtime_;
     CorpusViewService service_;

@@ -131,6 +131,12 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 
 ## wxWidgets And Acceptance Timing
 
+- Cache operation errors must be stored separately from timer-refreshed statistics;
+  otherwise real failed configuration saves lose their diagnostic on the next
+  playback refresh. Clear the settings error only on successful Apply. Native
+  Windows message boxes abbreviate long paths; use a bounded, scrollable read-only
+  text dialog for full cache paths and diagnostics, preserving copy access.
+
 - Window destruction evidence must observe the real native event, not the
   `Destroy()` request. The desktop links `comctl32` for `SetWindowSubclass`;
   the wxApp-owned callback records a primitive timestamp after default

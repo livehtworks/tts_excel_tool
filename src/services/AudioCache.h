@@ -39,6 +39,7 @@ public:
     AudioCacheStats FinishClear();
     void Configure(AudioCacheOptions options);
     AudioCacheStats Stats(bool include_active = false) const;
+    const std::filesystem::path& Root() const;
     void FlushUsage();
     static void Validate(const AudioBuffer& audio);
 private:

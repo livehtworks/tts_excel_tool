@@ -330,6 +330,8 @@ void AudioCache::Validate(const AudioBuffer& audio) {
         audio.samples.size()%audio.channels || !std::all_of(audio.samples.begin(),audio.samples.end(),[](float v){return std::isfinite(v);}))
         throw std::runtime_error("Invalid audio samples/rate/channels");
 }
+const std::filesystem::path& AudioCache::Root() const { return impl_->root; }
+
 AudioCacheStats AudioCache::Stats(bool include_active) const {
     std::lock_guard lock(impl_->state);
     auto result=impl_->stats;

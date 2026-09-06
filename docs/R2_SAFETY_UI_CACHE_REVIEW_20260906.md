@@ -61,6 +61,33 @@ statuses are not upgraded by R2 tests. Historical ENV-02 evidence remains missin
 
 These are subcase results, not full-item or overall acceptance:
 
+- F9 GUI closes UI02-A/D. A real Windows read-sharing handle without DELETE
+  sharing on the isolated config causes atomic replacement to fail. Unapplied
+  quota 2049 leaves the 2048 MiB effective limit and config bytes unchanged;
+  failed Apply restores 2048 and the same bytes. F8 first reproduces the error
+  disappearing when playback starts. The F9 fix retains the settings error
+  separately through cold synthesis, real playback and pause. Unlock plus Apply
+  during playback succeeds and clears it. The paused device holds 123904 bytes
+  in the observed external lease; this is not live-clear acceptance.
+  Pause at item 4, scroll to rows 12-29 and select reference F23, disable follow,
+  resume across subsequent items and scroll to rows 30-47: view/selected source
+  stay user-controlled. Reenable follow at item 24: subsequent item positioning
+  brings the playback cell into view without changing F23/owner21 details.
+  Stop at item 45 returns Idle and removes only the playback highlight.
+  Screenshots: `native/ui-f1/f8-cache-*.jpg` and `native/ui-f1/f9-*.jpg`.
+- F10 replaces the native cache message box, which visibly abbreviates long
+  paths, with a resizable, scrollable read-only text dialog. It includes the
+  actual AudioCache-owned root, complete warnings and saved-setting errors.
+  The existing P5 capacity test now verifies the root accessor against its
+  independently allocated cache directory. F10 Release build passes; targeted
+  Release is 6/6 in 8.84 seconds and Core 4/4 in 4.90 seconds. Logs:
+  `native/stage-f10-build.log`, `native/stage-f10-targeted-tests.log`,
+  `native/stage-f10-core-build.log`, `native/stage-f10-core-tests.log`.
+  Built EXE `native/app-f10-full/AdayoCorpusTool.exe`, SHA256
+  `36F00190E086816B8BEAEB86F780FD1950EBAE99EF9230A59D2B422D957C6993`.
+  Its detail-dialog visual/copy check remains unverified after actual desktop
+  input interrupted automation. The F9 screenshots are not F10 dialog evidence.
+
 - F8 comparison GUI and OOXML readback close UI04-A/C, UI05-A/B/C and
   UI06-B/C. F1 two-group exports retain both groups and all three sheets when
   viewing group two. An unapplied path edit disables Start; Apply invalidates
@@ -241,13 +268,13 @@ These are subcase results, not full-item or overall acceptance:
   layout. Expanded and re-collapsed screenshots retain a nonzero result grid
   at the same 1898x1219 window size (`native/ui-d7/compare-*.jpg`).
 
-The F8 protected-file after manifest matches all 758 before records (bytes, SHA256
+The F10 protected-file after manifest matches all 758 before records (bytes, SHA256
 and file identity), covering the scoped canonical program/models and original
-workbook (`protection-after-f8.log`). Historical whole-backup evidence is not inferred.
+workbook (`protection-after-f10.log`). Historical whole-backup evidence is not inferred.
 Remaining full-item evidence includes full GUI/DPI/device/lifecycle and composite
 cache matrices. `acceptance_results.json` in the private evidence root records
 individual work-package assertions separately from the partial native/GUI results.
-The reconciled assertion snapshot is 29 PASS / 29 NOT_RUN. Each NOT_RUN now names
+The reconciled assertion snapshot is 31 PASS / 27 NOT_RUN. Each NOT_RUN now names
 its specific missing combination or unresolved measurement; it is not a generic
 claim that source work or tools are blocked. NOT_RUN denotes an
 unproven complete assertion, even where individual subcases have passed. E5
@@ -271,7 +298,10 @@ snapshot. Do not regenerate the protection-before baseline.
 
 Active desktop input interrupted E1 GUI automation; that session was not discarded
 or forcibly terminated by the agent. It was absent when this continuation resumed.
-F1/F5/F6/F7 windows closed normally; F8 is the latest isolated verification process.
+F1/F5/F6/F7/F8 windows closed normally; F9 is the latest observed isolated process.
+Its close attempt was interrupted by detected user input; it was left open.
+F10 is rebuilt separately but its new cache detail dialog has not been visually
+verified. No automated desktop input continued after re-observing the interruption.
 Remaining acceptance
 includes the complete dirty/export-leave flow, actual playback/pause/live-clear
 matrix, full registry and multi-group interaction, DPI, and all long-task close

@@ -75,7 +75,8 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent, ApplicationRuntime& runtime)
         const auto previous=options;
         long requested_limit{};
         if(!cache_limit_->GetTextValue().ToLong(&requested_limit) || requested_limit<cache_limit_->GetMin() || requested_limit>cache_limit_->GetMax()) {
-            cache_status_->SetLabel(WxUtf8("缓存上限无效")); return;
+            cache_settings_error_="缓存上限无效";
+            UpdateCacheUi(); return;
         }
         options.enabled=cache_enabled_->GetValue();
         options.disk_limit_bytes=static_cast<std::uint64_t>(requested_limit)*1024*1024;
@@ -101,7 +102,8 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent, ApplicationRuntime& runtime)
                 cache_enabled_->Enable(runtime_.ConfigSaveAllowed()); cache_limit_->Enable(runtime_.ConfigSaveAllowed());
                 cache_enabled_->SetValue(runtime_.ConfigSnapshot().audio_cache.enabled);
                 cache_limit_->SetValue(static_cast<int>(runtime_.Tts().Cache()->Stats().active_limit/(1024*1024)));
-                UpdateCacheUi(); if(!error.empty()) cache_status_->SetLabel(WxUtf8(error));
+                cache_settings_error_=error;
+                UpdateCacheUi();
             });
         });
     };
@@ -171,12 +173,22 @@ CorpusRunPanel::CorpusRunPanel(wxWindow* parent, ApplicationRuntime& runtime)
     auto* cache_details=new wxButton(this,wxID_ANY,WxUtf8("缓存详情"));
     cache_details->Bind(wxEVT_BUTTON,[this](wxCommandEvent&) {
         const auto stats=runtime_.Tts().Cache()->Stats(true);
-        wxMessageBox(WxUtf8("占用字节："+std::to_string(stats.used_bytes)+"\n条目："+std::to_string(stats.entries)+
+        const auto details=WxUtf8("缓存路径："+PathToUtf8(runtime_.Tts().Cache()->Root())+
+            "\n占用字节："+std::to_string(stats.used_bytes)+"\n条目："+std::to_string(stats.entries)+
             "\n上限："+std::to_string(stats.active_limit)+"\n缓存持有字节："+std::to_string(stats.memory_bytes)+
             "\n外部租约字节："+std::to_string(stats.active_bytes)+"\n待刷写条目："+std::to_string(stats.dirty_entries)+
             "\n清空成功 / 失败："+std::to_string(stats.deleted_entries)+" / "+std::to_string(stats.failed_entries)+
             "\n元数据写入 / 失败："+std::to_string(stats.metadata_writes)+" / "+std::to_string(stats.timestamp_write_failures)+
-            "\n占用已核实："+(stats.accounting_valid?"是":"否")+"\n"+stats.warning),WxUtf8("缓存详情"),wxOK|wxICON_INFORMATION,this);
+            "\n占用已核实："+(stats.accounting_valid?"是":"否")+"\n"+stats.warning+
+            (cache_settings_error_.empty()?std::string{}:"\n缓存设置未保存："+cache_settings_error_));
+        wxDialog dialog(this,wxID_ANY,WxUtf8("缓存详情"),wxDefaultPosition,wxDefaultSize,wxDEFAULT_DIALOG_STYLE|wxRESIZE_BORDER);
+        auto* sizer=new wxBoxSizer(wxVERTICAL);
+        auto* text=new wxTextCtrl(&dialog,wxID_ANY,details,wxDefaultPosition,wxDefaultSize,wxTE_MULTILINE|wxTE_READONLY);
+        sizer->Add(text,1,wxEXPAND|wxALL,8);
+        sizer->Add(dialog.CreateStdDialogButtonSizer(wxOK),0,wxALIGN_RIGHT|wxALL,8);
+        dialog.SetSizer(sizer); dialog.SetMinSize(FromDIP(wxSize(480,300)));
+        dialog.SetSize(FromDIP(wxSize(680,440))); dialog.CentreOnParent();
+        text->SetInsertionPoint(0); text->SetFocus(); dialog.ShowModal();
     });
     selection_bar->AddStretchSpacer(); selection_bar->Add(cache_details,0);
     root->Add(selection_bar,0,wxEXPAND|wxLEFT|wxRIGHT|wxBOTTOM,6);
@@ -288,9 +300,10 @@ void CorpusRunPanel::UpdateCacheUi() {
     if(!runtime_.Tts().Cache()) return;
     const auto stats=runtime_.Tts().Cache()->Stats();
     const auto label=(stats.accounting_valid?std::to_string(stats.used_bytes/(1024*1024)):std::string("占用未确认"))+" / "+std::to_string(stats.active_limit/(1024*1024))+" MiB, "+
-        std::to_string(stats.entries)+" 条"+(stats.clearing ? "，清理中" : "")+(stats.warning.empty() ? "" : "，有告警");
+        std::to_string(stats.entries)+" 条"+(stats.clearing ? "，清理中" : "")+(stats.warning.empty() ? "" : "，有告警")+
+        (cache_settings_error_.empty() ? "" : "，缓存设置未保存");
     cache_status_->SetLabel(WxUtf8(label));
-    cache_status_->SetToolTip(WxUtf8(label+"\n"+stats.warning));
+    cache_status_->SetToolTip(WxUtf8(label+"\n"+stats.warning+"\n"+cache_settings_error_));
 }
 
 void CorpusRunPanel::SetSession(CorpusSession session, std::function<void()> installed) {

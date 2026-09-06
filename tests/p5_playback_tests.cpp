@@ -441,6 +441,7 @@ void TestCacheCapacityAndLru() {
     const auto root=NewCacheTestRoot();
     AudioCacheOptions options; options.entry_limit=2; options.memory_limit_bytes=640;
     AudioCache cache(root/"tts-v1",options);
+    REQUIRE(cache.Root()==std::filesystem::absolute(root/"tts-v1").lexically_normal());
     auto audio=std::make_shared<AudioBuffer>(); audio->sample_rate=16000; audio->channels=1; audio->samples.assign(160,0.1f);
     const auto a=Sha256("a"),b=Sha256("b"),c=Sha256("c");
     cache.Put(a,"voice",audio,0); cache.Put(b,"voice",audio,0);
