@@ -28,7 +28,18 @@ Current phase: R2 safety/interaction/cache source handoff with incomplete compos
 
 ## Verification And Remaining Acceptance
 
-- Current assertions: 36 PASS / 22 NOT_RUN, not R2 PASS. SAFE-02, SAFE-04 and
+- Current assertions: 38 PASS / 20 NOT_RUN, not R2 PASS. SAFE03-A and QA01-D
+  now have real F12 GUI evidence: replacing a session during slow synthesis
+  removes the old highlight and automatically restores idle controls. A separate
+  12499-character synthesis is closed while still native; repeated Close remains
+  responsive. Actual cancellation precedes native return by 21892.458 ms, then
+  worker join follows by 25.043 ms and native window destruction by 197.164 ms.
+  The process is absent and the isolated cache contains only its owner files.
+  All three saved slow-session exports pass exact 3889-cell XML comparison.
+  Evidence: `native/ui-f11/check-active-close.ps1`, `active-close-readback.log`,
+  `slow-session-*.jpg`, `active-close-*.jpg`, and the F12 application log.
+  This closes neither the other long-task scenarios nor the full SAFE-03 matrix.
+  SAFE-02, SAFE-04 and
   UI-06 now pass. F11 completes all four preset GUI save/close/restarts with
   identical config bytes and restored controls, supplementing custom/report/
   folding checks. Real export failure retains the edited session and releases
@@ -49,7 +60,7 @@ Current phase: R2 safety/interaction/cache source handoff with incomplete compos
   43008-byte lease/config and resumes, but the full live-clear matrix remains.
   Latest program: external `native/app-f12-full/AdayoCorpusTool.exe`;
   targeted Release 6/6 in 8.56 seconds, Core 4/4 in 4.97 seconds and real P4
-  cache identity/cancellation contracts pass. F12 protection matches all 758
+  cache identity/cancellation contracts pass. Post-close protection matches all 758
   scoped records. No established runtime replacement or ZIP.
 
 - Comparison continuation fixes missing per-row metrics/source labels, strict

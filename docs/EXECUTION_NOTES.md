@@ -151,6 +151,13 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
   `WM_NCDESTROY` processing, with no access to a destroyed frame or Runtime.
   Persist it in OnExit after Runtime's logger closes. Idle/paused native-close
   traces are subcases, not the entire long-task shutdown matrix.
+- For an active-native close check, confirm cancellation precedes the matching
+  synthesis return in the same launch. A screenshot taken while Stopping does
+  not prove a later Close still overlapped native work. Save the edited session
+  before starting, retain unsuccessful timing attempts, and use a longer real
+  input when separate GUI observations consume the overlap window. F12's
+  12499-character English input supplies a real four-phase trace without a mock
+  barrier; the earlier repeated-Stop attempt returned before Close and does not.
 - The P4 `--r2-cache-contracts` case uses real Arctic, Xiao Ya and Ukrainian
   models. It shares the regular P4 target and is also called by its full suite.
   Cancellation at the existing native-return callback is a deterministic

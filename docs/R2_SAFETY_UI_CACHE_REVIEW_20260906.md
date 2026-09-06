@@ -61,6 +61,30 @@ statuses are not upgraded by R2 tests. Historical ENV-02 evidence remains missin
 
 These are subcase results, not full-item or overall acceptance:
 
+- F12 continuation closes SAFE03-A and QA01-D without a production-code change.
+  The saved 6259-character English G2 input enters real Amy synthesis. Generate
+  installs a new original session while the old native operation is pending:
+  the original text is restored, the old highlight is absent, and Stopping is
+  visible. Controls automatically return to Idle without a recovery command.
+  The subsequent scroll observation is already Idle, so it is not claimed as
+  evidence of scrolling while Stopping. The first Close experiment exercises
+  repeated Stop, but its synthesis returns before Close and is retained only
+  as a subcase. A fresh saved 12499-character input then enters actual synthesis;
+  direct Close displays the pending-native shutdown status and repeated Close
+  remains responsive. The final launch records exactly one of each phase:
+  cancel_requested at 02:44:58.105, native_returned/synthesize at 02:45:19.998,
+  worker_joined at 02:45:20.023, and WM_NCDESTROY_after_default at 02:45:20.223
+  on 2026-09-07. Steady-clock deltas are 21892.458, 25.043 and 197.164 ms.
+  The matching process/window are absent; cache content remains owner.json and
+  owner.lock only, with no audio publication. Three GUI-saved workbooks each
+  compare all 3889 cells against the previously verified export, allowing only
+  the specified text edit, absent manual result and new import timestamp.
+  Evidence: external `native/ui-f11/check-active-close.ps1`,
+  `active-close-readback.log`, `active-close-window-observation.json`,
+  `slow-session-*.jpg`, `new-session-idle-after-native-return-0.jpg`,
+  `close-native-*.jpg`, `active-close-*.jpg`, and the F12 application log.
+  This is not the full long-task close matrix, concurrent snapshot polling,
+  rapid replacement Play or device-clear coverage.
 - F12 closes SAFE02-C and fixes a real atomic-write boundary found through the
   F10 GUI. Export-then-close to a valid 240-character filename fails creating
   its overlong temporary sibling. The failed export keeps the manual G2 result,
@@ -348,13 +372,13 @@ These are subcase results, not full-item or overall acceptance:
   layout. Expanded and re-collapsed screenshots retain a nonzero result grid
   at the same 1898x1219 window size (`native/ui-d7/compare-*.jpg`).
 
-The F12 protected-file after manifest matches all 758 before records (bytes, SHA256
+The post-close protected-file after manifest matches all 758 before records (bytes, SHA256
 and file identity), covering the scoped canonical program/models and original
-workbook (`protection-after-f12.log`). Historical whole-backup evidence is not inferred.
+workbook (`protection-after-f14.log`). Historical whole-backup evidence is not inferred.
 Remaining full-item evidence includes full GUI/DPI/device/lifecycle and composite
 cache matrices. `acceptance_results.json` in the private evidence root records
 individual work-package assertions separately from the partial native/GUI results.
-The reconciled assertion snapshot is 36 PASS / 22 NOT_RUN. Each NOT_RUN now names
+The reconciled assertion snapshot is 38 PASS / 20 NOT_RUN. Each NOT_RUN now names
 its specific missing combination or unresolved measurement; it is not a generic
 claim that source work or tools are blocked. NOT_RUN denotes an
 unproven complete assertion, even where individual subcases have passed. E5
@@ -384,8 +408,9 @@ session was exported before closing, and its detail dialog was visually checked.
 Remaining acceptance
 includes the complete playback/pause/live-clear
 matrix, full registry and multi-group interaction, DPI, and all long-task close
-cases. Actual `window_destroyed` instrumentation now exists, with idle and paused
-close evidence. The active-native four-phase trace still needs verification;
-`native_returned` and `worker_joined` alone do not establish QA01-D. Performance
+cases. Actual `window_destroyed` instrumentation now has idle, paused and
+active-native four-phase close evidence; F12 closes QA01-D with ordered
+cancellation, native return, worker join and native destruction timestamps.
+These timestamps do not stand in for the remaining task-specific cases. Performance
 outliers remain disclosed above. The source handoff must not be described as all
 R2 work completed. No existing runtime was replaced and no ZIP was created.
