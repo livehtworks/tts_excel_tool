@@ -178,10 +178,10 @@ static void TestSessionRevisionAndExportIdentity() {
     REQUIRE(next.revision==2); REQUIRE(next.view.rows[0][3].empty());
 }
 
-static void TestAtomicWriteFaults() {
-    const auto root=test::IsolatedRoot()/"io-faults";
+static void TestAtomicWriteFaults(const std::string& name, int case_index) {
+    const auto root=test::IsolatedRoot()/("io-faults-"+std::to_string(case_index));
     std::filesystem::create_directory(root);
-    const auto path=root/"config.json";
+    const auto path=root/PathFromUtf8(name);
     const std::string original="{original}",replacement="{replacement}";
     WriteBinaryFileAtomically(path,original.data(),original.size());
     const auto hash=FileSha256(path);
@@ -225,7 +225,11 @@ static void TestAtomicWriteFaults() {
 int main() {
     return test::RunTestMain("adayo_core_tests", [] {
         TestUtf8();
-        TestAtomicWriteFaults();
+        TestAtomicWriteFaults("config.json",0);
+        TestAtomicWriteFaults(std::string(250,'x')+".json",1);
+        std::string unicode_name;
+        for(int i=0;i<80;++i) unicode_name+="界";
+        TestAtomicWriteFaults(unicode_name+".json",2);
         TestSessionRevisionAndExportIdentity();
         TestSimilarityUsesCodepoints();
         TestDiff();

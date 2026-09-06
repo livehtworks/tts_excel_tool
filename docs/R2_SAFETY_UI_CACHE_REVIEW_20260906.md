@@ -37,9 +37,9 @@ Implementation and verification are independent. No overall PASS is claimed.
 | Issue | Implementation | Verification |
 | --- | --- | --- |
 | SAFE-01 native admission | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
-| SAFE-02 dirty/export revisions | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
+| SAFE-02 dirty/export revisions | IMPLEMENTED | PASS |
 | SAFE-03 playback/session terminal state | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
-| SAFE-04 configuration save ordering | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
+| SAFE-04 configuration save ordering | IMPLEMENTED | PASS |
 | SAFE-05 recoverable voice preparation | IMPLEMENTED | PASS |
 | CACHE-01 LRU write failure | IMPLEMENTED | PASS |
 | CACHE-02 shared model load identity | IMPLEMENTED | PASS |
@@ -61,6 +61,39 @@ statuses are not upgraded by R2 tests. Historical ENV-02 evidence remains missin
 
 These are subcase results, not full-item or overall acceptance:
 
+- F12 closes SAFE02-C and fixes a real atomic-write boundary found through the
+  F10 GUI. Export-then-close to a valid 240-character filename fails creating
+  its overlong temporary sibling. The failed export keeps the manual G2 result,
+  source selection and session; controls recover. A direct retry to the fresh
+  `native/ui-f11/export-failure-retry.xlsx` succeeds and does not execute the
+  previous close action. A subsequent normal Close exits without a dirty prompt.
+  Core/P7 regressions reproduce the same failure before the fix (2/2 fail in
+  `native/stage-f12-red-tests.log`). The writer now hashes only overlong
+  temporary-name prefixes without truncating Unicode or altering ordinary cache
+  temporary ownership names. Core cases cover 255-byte ASCII and 245-byte
+  Unicode names, write/flush/close/replace faults, collision preservation and
+  successful replacement; P7 reads back full long-name XLSX creation/replacement.
+  Rebuilt F12 GUI exports the exact previously failing 240-character name and
+  closes normally. Both GUI exports match all 47x8 cells and 376 source identities
+  through the production reader; independent XML checks compare 3889 cells per
+  workbook against the earlier verified snapshot with only the explicitly
+  removed text edits and new import timestamp allowed. No source is rewritten.
+  Evidence: `native/ui-f11/{native-retry-readback,native-long-readback,xml-retry-readback}.log`,
+  `check-retry-xml.ps1`, `export-failure-*.jpg`, `export-retry-does-not-close-0.jpg`,
+  `fixed-long-filename-selected-*.jpg` and F10/F12 application logs.
+  F12 targeted Release passes 6/6 in 8.56 seconds, Core 4/4 in 4.97 seconds and
+  real P4 cache identity/cancellation contracts pass. The 1000-generation suite
+  is not rerun for this bounded filename change; F5 full results remain indexed.
+  Latest EXE: `native/app-f12-full/AdayoCorpusTool.exe`, SHA256
+  `6f228b405bbbf216b15fe071ca6fe6aee5fd8f63b3a5e0c0bc475c5e19e091cb`.
+- SAFE04-C is reconciled with the completed F9 GUI evidence: real config sharing
+  lock preserves existing bytes and restores the old quota, playback/pause
+  remain usable, and unlocked Apply during playback succeeds and clears the
+  persisted error. Native atomic fault and concurrent field-save tests also pass.
+  The real call chain releases AudioCache::Configure locks before SaveConfig;
+  disk IO holds only config_save_mutex_, not config_mutex_, playback-control,
+  request or audio-callback locks. Thus SAFE04-A/B/C all pass; this does not
+  promote the separate live-clear or long-task shutdown matrices.
 - F11 closes UI06-A: Strict, CER, WER and Legacy are each selected in the real
   F10 GUI, saved, normally closed and relaunched. All config bytes remain equal
   across each restart; the comparison page restores the metric, pairing,
@@ -76,7 +109,7 @@ These are subcase results, not full-item or overall acceptance:
   Cancel preserves the edited values, result, G2 result selection/source details,
   and 1-47 range. Cancelling the save path after export-then-close also retains
   the session and does not close. This closes only the path-cancel part of
-  SAFE02-C; GUI export failure remains unverified.
+  SAFE02-C; F12 supplies the actual failure/retry evidence described above.
   SAFE02-D passes: accepting unchanged F2 text and regenerating does not prompt;
   F9 playback-only close also did not prompt. Export-then-close on F10 creates
   `native/ui-f11/edited-runtime-close.xlsx` before controlled exit. Production
@@ -315,13 +348,13 @@ These are subcase results, not full-item or overall acceptance:
   layout. Expanded and re-collapsed screenshots retain a nonzero result grid
   at the same 1898x1219 window size (`native/ui-d7/compare-*.jpg`).
 
-The F11 protected-file after manifest matches all 758 before records (bytes, SHA256
+The F12 protected-file after manifest matches all 758 before records (bytes, SHA256
 and file identity), covering the scoped canonical program/models and original
-workbook (`protection-after-f11.log`). Historical whole-backup evidence is not inferred.
+workbook (`protection-after-f12.log`). Historical whole-backup evidence is not inferred.
 Remaining full-item evidence includes full GUI/DPI/device/lifecycle and composite
 cache matrices. `acceptance_results.json` in the private evidence root records
 individual work-package assertions separately from the partial native/GUI results.
-The reconciled assertion snapshot is 34 PASS / 24 NOT_RUN. Each NOT_RUN now names
+The reconciled assertion snapshot is 36 PASS / 22 NOT_RUN. Each NOT_RUN now names
 its specific missing combination or unresolved measurement; it is not a generic
 claim that source work or tools are blocked. NOT_RUN denotes an
 unproven complete assertion, even where individual subcases have passed. E5
@@ -345,11 +378,11 @@ snapshot. Do not regenerate the protection-before baseline.
 
 Active desktop input interrupted E1 GUI automation; that session was not discarded
 or forcibly terminated by the agent. It was absent when this continuation resumed.
-F1/F5/F6/F7/F8/F9/F10 windows closed normally. F11 desktop automation paused on
+F1/F5/F6/F7/F8/F9/F10/F12 windows closed normally. F11 desktop automation paused on
 detected user input and resumed after explicit user confirmation. F10's edited
 session was exported before closing, and its detail dialog was visually checked.
 Remaining acceptance
-includes export-failure leave protection, the complete playback/pause/live-clear
+includes the complete playback/pause/live-clear
 matrix, full registry and multi-group interaction, DPI, and all long-task close
 cases. Actual `window_destroyed` instrumentation now exists, with idle and paused
 close evidence. The active-native four-phase trace still needs verification;

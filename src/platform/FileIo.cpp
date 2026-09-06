@@ -37,7 +37,11 @@ std::filesystem::path TempSiblingPath(const std::filesystem::path& path) {
 #else
         std::to_string(getpid());
 #endif
-    return path.parent_path() / (path.filename().wstring() + std::wstring(suffix.begin(), suffix.end()));
+    const auto name = PathToUtf8(path.filename());
+    // Keep the sibling component bounded without truncating Unicode or changing
+    // ordinary cache filenames, whose temporary names carry ownership metadata.
+    const auto prefix = name.size() + suffix.size() > 255 ? Sha256(name) : name;
+    return path.parent_path() / PathFromUtf8(prefix + suffix);
 }
 
 void ReplaceFileAtomically(const std::filesystem::path& from, const std::filesystem::path& to) {

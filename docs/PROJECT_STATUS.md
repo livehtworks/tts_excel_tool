@@ -28,29 +28,29 @@ Current phase: R2 safety/interaction/cache source handoff with incomplete compos
 
 ## Verification And Remaining Acceptance
 
-- F9 actual GUI closes UI02-A/D: pause/scroll/selection and follow-off/on across
-  real English items retain the selected F23 source identity; Stop removes only
-  the playback marker. Unapplied quota leaves effective/config values unchanged.
-  A real isolated config sharing lock reproduces failed Apply and restores 2048
-  MiB. The error previously vanished on playback timer refresh; it now persists
-  through synthesis/playback/pause until a successful Apply. F10 additionally
-  replaces the path-truncating cache message box with a scrollable read-only
-  detail dialog and exposes the actual cache root. F11 verifies its full-path
-  display and real copy/paste roundtrip. Actual paused-device clear removes all
-  45 entries with no failed deletes, preserves the 43008-byte lease and config,
-  then resumes playback. F10 GUI also verifies edited-reference/play/result
-  close and regenerate cancellation, save-dialog cancellation, and successful
-  export-then-close. Production-reader and independent XML readback match the
-  complete 47x8 edited snapshot and source identities. SAFE02-A/D now pass;
-  export-failure leave protection remains unverified. Both F9 and F10 closed
-  normally. F11 additionally verifies actual GUI save/close/restart for all four
-  comparison presets, with identical config bytes and restored controls. With
-  earlier custom/reports/folding evidence, UI06-A/B/C all pass. Current assertions:
-  34 PASS / 24 NOT_RUN, not R2 PASS.
-  Latest rebuilt program: external `native/app-f10-full/AdayoCorpusTool.exe`;
-  targeted Release passes 6/6 in 8.84 seconds and Core 4/4 in 4.90 seconds.
-  Protected-file recheck matches all 758 scoped records. No established runtime
-  replacement.
+- Current assertions: 36 PASS / 22 NOT_RUN, not R2 PASS. SAFE-02, SAFE-04 and
+  UI-06 now pass. F11 completes all four preset GUI save/close/restarts with
+  identical config bytes and restored controls, supplementing custom/report/
+  folding checks. Real export failure retains the edited session and releases
+  pending close; retry exports successfully without closing unexpectedly.
+  F12 fixes the discovered long-filename atomic-write failure by bounding only
+  overlong temporary-name prefixes; ordinary cache temporary names remain intact.
+  Core/P7 tests reproduce the failure before the fix. F12 GUI successfully
+  exports the same 240-character filename and closes normally. Both new exports
+  pass exact production-reader 47x8/376-coordinate checks and independent XML
+  checks of 3889 cells. Evidence: `native/ui-f11/*retry*`, `*long*`, and
+  `native/stage-f12-*.log` in the external run root.
+  F9 real config sharing-lock failure/rollback/retry during audio activity,
+  native fault tests and lock-ownership review establish SAFE04-C. Configuration
+  disk IO holds neither playback-control nor audio-callback locks. Its error
+  persists until successful Apply; F10/F11 verify full cache-detail display/copy.
+  UI02-A/D retain F23 selection during follow/scroll and remove only the playback
+  marker on Stop. Paused-device clear removes 45 entries, preserves its
+  43008-byte lease/config and resumes, but the full live-clear matrix remains.
+  Latest program: external `native/app-f12-full/AdayoCorpusTool.exe`;
+  targeted Release 6/6 in 8.56 seconds, Core 4/4 in 4.97 seconds and real P4
+  cache identity/cancellation contracts pass. F12 protection matches all 758
+  scoped records. No established runtime replacement or ZIP.
 
 - Comparison continuation fixes missing per-row metrics/source labels, strict
   normalization control state, initial summary wrapping, Indel group N/A and
@@ -106,4 +106,4 @@ Current phase: R2 safety/interaction/cache source handoff with incomplete compos
 - Pending user verification: human listening; the full cold/warm playback/control/close and live clear matrix; rapid file/sheet/header changes; multi-language edit/range/cursor combinations; close/cancel/reopen during background work. Automated portions of these composite cases are documented separately, not promoted to full PASS.
 - Arabic/Spanish resource blockers are resolved by preparing the already downloaded weights; no voice substitution or bulk redownload was performed. New language listening/business acceptance and actual ASR accuracy remain NOT_RUN where recognizer output or human assessment has not been supplied.
 - Evidence limitation: original workbook preflight hash and isolated review/model/junction protections passed, but no full pre-task hash inventory of all established production/backup files was recorded. This cannot be reconstructed retrospectively.
-- The previous source handoff was committed/pushed as `5b7bee0`. The latest request authorizes the R2 source commit/push, but not established runtime replacement. Baseline/final builds and application directories are isolated outside the repository. No user-owned running review process is stopped. E1 automation was interrupted without discarding its session; it was no longer present when this continuation resumed. F1/F5/F6/F7/F8/F9/F10 windows closed normally. F10 is the newest build; its edited session was exported before closing, with independent readback evidence in `native/ui-f11`.
+- The previous source handoff was committed/pushed as `5b7bee0`. The latest request authorizes the R2 source commit/push, but not established runtime replacement. Baseline/final builds and application directories are isolated outside the repository. No user-owned running review process is stopped. E1 automation was interrupted without discarding its session; it was no longer present when this continuation resumed. F1/F5/F6/F7/F8/F9/F10/F12 windows closed normally. F12 is the newest build; its edited session was exported before closing, with independent readback evidence in `native/ui-f11`.

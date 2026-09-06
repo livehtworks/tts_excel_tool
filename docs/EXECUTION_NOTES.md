@@ -50,6 +50,14 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 
 ## Audio Cache / Windows IO
 
+- A valid 240/255-character destination can fail atomic export if a temporary
+  suffix is appended to the complete filename. The shared writer hashes only
+  overlong filename prefixes, keeping the temporary sibling within 255 UTF-8
+  bytes. Preserve ordinary cache temporary names: startup ownership recognition
+  depends on the existing `<key>.wav/json.tmp-*` pattern. Long-name regression
+  must cover real creation/replacement/readback, failure preservation and
+  exclusive-create collisions, not merely the final path's validity.
+
 - The native performance CSV appends `model_load_identity`; parse named columns,
   not fixed positional field counts. A cache hit records its requested identity
   without claiming that the active native engine is loaded for that request.

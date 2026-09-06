@@ -100,6 +100,26 @@ void TestComparisonExport() {
 #endif
 }
 
+void TestRuntimeLongFilenameExport() {
+    std::cout << "P7 long filename export and replacement\n" << std::flush;
+    const auto output=OutputDir()/(std::string(250,'x')+".xlsx");
+    auto view=MakeRuntimeView();
+    LibXlsxWriterExporter exporter;
+    for(int revision=0;revision<2;++revision) {
+        if(revision) view.rows[0][2]="Updated long filename export";
+        exporter.ExportRuntimeView(view,output);
+        REQUIRE(std::filesystem::file_size(output)>0);
+#ifdef ADAYO_CAN_VERIFY_XLSX_READ
+        OpenXlsxWorkbookReader reader;
+        const auto data=reader.ReadSheet(output,"运行视图",1);
+        REQUIRE(data.headers==view.headers);
+        REQUIRE(data.rows==view.rows);
+        REQUIRE(reader.ReadSheet(output,"来源",1).rows[2][1]==view.source.sha256);
+        REQUIRE(reader.ReadSheet(output,"坐标映射",1).rows.size()==view.rows.size()*view.columns.size());
+#endif
+    }
+}
+
 void TestComparisonGroupExport() {
     std::cout << "P7 comparison group export\n" << std::flush;
     const auto output = OutputDir() / PathFromUtf8("多语言对比报告.xlsx");
@@ -213,6 +233,7 @@ void TestExternalWorkbookExport() {
 int main() {
     return test::RunTestMain("adayo_p7_export_tests", [] {
         TestRuntimeExport();
+        TestRuntimeLongFilenameExport();
         TestComparisonExport();
         TestComparisonGroupExport();
         TestMetricAndLimitExports();
