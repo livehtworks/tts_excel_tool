@@ -50,6 +50,12 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 
 ## Audio Cache / Windows IO
 
+- The native performance CSV appends `model_load_identity`; parse named columns,
+  not fixed positional field counts. A cache hit records its requested identity
+  without claiming that the active native engine is loaded for that request.
+- Retain all matched performance rounds. Compare per-round resource validation
+  and lookup timing when aggregate p95 regresses; resource enumeration and file
+  identity checks must not be removed to improve the measured hit latency.
 - Close the metadata input stream before atomically replacing that metadata file: Windows open handles without delete sharing prevent replacement.
 - Cache LRU timestamps must distinguish successive operations within one clock tick; timestamp ties must not evict a more recent entry by hash ordering.
 - Cache acceptance uses fresh external roots. Do not run fault/clear/quota tests against the application's established cache or model directory.

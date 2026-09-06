@@ -24,7 +24,8 @@ ApplicationRuntime::ApplicationRuntime(std::filesystem::path exe_dir, AtomicFile
               ",cache_write_ms="+std::to_string(t.cache_write_ms)+",audio_prepare_ms="+std::to_string(t.audio_prepare_ms)+
               ",device_init_ms="+std::to_string(device)+",first_nonzero_callback_ms="+(first?std::to_string(*first):"NOT_RUN")+
               ",playback_done_ms="+(done?std::to_string(*done):"NOT_RUN")+",load_call_delta="+std::to_string(t.load_call_delta)+
-              ",synth_call_delta="+std::to_string(t.synth_call_delta)+",canceled="+(canceled?"true":"false"));
+              ",synth_call_delta="+std::to_string(t.synth_call_delta)+",canceled="+(canceled?"true":"false")+
+              ",logical_model_id="+t.logical_model_id+",model_load_identity="+t.model_load_identity);
       }),
       background_worker_([this](std::exception_ptr error) {
           try {

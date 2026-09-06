@@ -188,7 +188,10 @@ void TestNativeCacheIdentityContracts() {
         std::cout << "NATIVE_CONTRACT id=" << id << " speaker=" << config.speaker_id
                   << " threads=" << config.num_threads << " rules=" << config.rule_fsts
                   << " key=" << result.timings.key << " source=" << result.timings.source
+                  << " load_identity=" << result.timings.model_load_identity
                   << " load=" << result.timings.load_call_delta << " synth=" << result.timings.synth_call_delta << '\n';
+        REQUIRE(result.timings.logical_model_id==id);
+        REQUIRE(result.timings.model_load_identity.size()==64);
         return result;
     };
     const std::string text="The same text belongs to two distinct speakers.";
@@ -200,6 +203,7 @@ void TestNativeCacheIdentityContracts() {
     REQUIRE(second.timings.load_call_delta==0);
     REQUIRE(first.timings.synth_call_delta==1 && second.timings.synth_call_delta==1);
     REQUIRE(first.timings.key!=second.timings.key);
+    REQUIRE(first.timings.model_load_identity==second.timings.model_load_identity);
     REQUIRE(first.audio->samples!=second.audio->samples);
     const auto again=prepare(arctic.id,first_config,text);
     REQUIRE(again.timings.source=="memory" && again.timings.load_call_delta==0 && again.timings.synth_call_delta==0);
@@ -209,6 +213,7 @@ void TestNativeCacheIdentityContracts() {
     ++second_config.num_threads;
     const auto threads=prepare(arctic.id+"::speaker-1",second_config,text);
     REQUIRE(threads.timings.key!=second.timings.key);
+    REQUIRE(threads.timings.model_load_identity!=second.timings.model_load_identity);
     REQUIRE(threads.timings.load_call_delta==1 && threads.timings.synth_call_delta==1);
 
     const auto zh=prepare(chinese.id,chinese.config,"今天是九月六日。");
@@ -218,9 +223,11 @@ void TestNativeCacheIdentityContracts() {
     without_rules.rule_fsts.clear();
     const auto rules=prepare(chinese.id,without_rules,"今天是九月六日。");
     REQUIRE(rules.timings.key!=zh.timings.key);
+    REQUIRE(rules.timings.model_load_identity!=zh.timings.model_load_identity);
     REQUIRE(rules.timings.load_call_delta==1 && rules.timings.synth_call_delta==1);
     const auto rules_restored=prepare(chinese.id,chinese.config,"今天是九月六日。");
     REQUIRE(rules_restored.timings.source=="memory" && rules_restored.timings.load_call_delta==0);
+    REQUIRE(rules_restored.timings.model_load_identity==zh.timings.model_load_identity);
     REQUIRE(rules_restored.audio->samples==zh.audio->samples);
     const auto restored_miss=prepare(chinese.id,chinese.config,"欢迎使用语料工具。");
     REQUIRE(restored_miss.timings.load_call_delta==1 && restored_miss.timings.synth_call_delta==1);
@@ -388,7 +395,7 @@ static int RunMain(int argc, char** argv) {
             if(mode=="baseline") service.EnsureModelLoaded(model.id,model.config);
             std::cout << "PREPARATION model=" << model.id << ",ms="
                       << std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count() << '\n';
-            std::cout << "index,model,mode,speaker,key_build_ms,model_validation_ms,lookup_ms,model_load_ms,synth_ms,cache_read_ms,cache_write_ms,audio_prepare_ms,source,load_call_delta,synth_call_delta,key,pcm_sha256,resource_enumerations,resource_attributes,resource_hash_bytes,metadata_writes,recounts,eviction_scans,pin_scans\n";
+            std::cout << "index,model,mode,speaker,key_build_ms,model_validation_ms,lookup_ms,model_load_ms,synth_ms,cache_read_ms,cache_write_ms,audio_prepare_ms,source,load_call_delta,synth_call_delta,key,pcm_sha256,resource_enumerations,resource_attributes,resource_hash_bytes,metadata_writes,recounts,eviction_scans,pin_scans,model_load_identity\n";
             std::size_t index=0;
             for(const auto& sample:fixture.at("samples")) {
                 auto config=model.config;
@@ -414,7 +421,7 @@ static int RunMain(int argc, char** argv) {
                     << t.load_call_delta << ',' << t.synth_call_delta << ',' << t.key << ',' << hash << ','
                     << t.resource_enumerations << ',' << t.resource_attributes << ',' << t.resource_hash_bytes << ','
                     << after.metadata_writes-before.metadata_writes << ',' << after.recounts-before.recounts << ','
-                    << after.eviction_scans-before.eviction_scans << ',' << after.pin_scans-before.pin_scans << '\n';
+                    << after.eviction_scans-before.eviction_scans << ',' << after.pin_scans-before.pin_scans << ',' << t.model_load_identity << '\n';
             }
             REQUIRE(index>=50);
         });

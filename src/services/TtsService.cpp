@@ -109,8 +109,12 @@ TtsService::ModelIdentities TtsService::ModelIdentity(const TtsModelConfig& conf
         Field(snapshot,std::to_string(std::filesystem::file_size(path)));
         Field(snapshot,std::to_string(std::filesystem::last_write_time(path).time_since_epoch().count()));
 #endif
-        if (!file_digests_.contains(path) && file_digests_.size()>=32768) file_digests_.erase(file_digests_.begin());
-        auto& cached=file_digests_[path];
+        auto entry=file_digests_.find(path);
+        if (entry==file_digests_.end()) {
+            if (file_digests_.size()>=32768) file_digests_.erase(file_digests_.begin());
+            entry=file_digests_.try_emplace(path).first;
+        }
+        auto& cached=entry->second;
         if (cached.snapshot!=snapshot || cached.digest.empty()) {
             resource_hash_bytes_+=std::filesystem::file_size(path);
             const auto digest=FileSha256(path);
@@ -158,6 +162,8 @@ PreparedAudio TtsService::Prepare(std::string_view model_id, const TtsModelConfi
     auto checkpoint=Clock::now();
     const auto identities=ModelIdentity(config,cache_!=nullptr);
     const auto& fingerprint=identities.audio;
+    result.timings.logical_model_id=model_id;
+    result.timings.model_load_identity=identities.load;
     result.timings.model_validation_ms=Ms(checkpoint);
     checkpoint=Clock::now();
     auto effective=request; effective.speed=static_cast<float>(std::clamp(request.speed,0.5,2.0));

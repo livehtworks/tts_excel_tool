@@ -5,8 +5,9 @@ Actual baseline: `5b7bee05d0d0518df44bbf684e4bb08ee580fbe2`, matching local HEAD
 and remote main at preflight; initial worktree clean. The latest user request
 authorizes source commit/push. Canonical resource updates, production executable
 replacement and ZIP remain excluded.
-Source implementation commit: `5b6aeea`. Verification documentation is committed
-separately; Git history is the authority for the final handoff SHA.
+Initial R2 implementation commit: `5b6aeea`; native cancellation and destruction
+tracing continued in `303abbb`. Git history is the authority for subsequent
+staged fixes and the final handoff SHA.
 
 ## Current Stage
 
@@ -40,7 +41,7 @@ Implementation and verification are independent. No overall PASS is claimed.
 | SAFE-04 configuration save ordering | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
 | SAFE-05 recoverable voice preparation | IMPLEMENTED | PASS |
 | CACHE-01 LRU write failure | IMPLEMENTED | PASS |
-| CACHE-02 shared model load identity | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
+| CACHE-02 shared model load identity | IMPLEMENTED | PASS |
 | CACHE-03 cache IO/LRU optimization | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
 | UI-01 voice selection/observations | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
 | UI-02 playback/edit/cache interaction | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
@@ -58,6 +59,33 @@ statuses are not upgraded by R2 tests. Historical ENV-02 evidence remains missin
 ## Current Evidence
 
 These are subcase results, not full-item or overall acceptance:
+
+- F5 full Release passes 7/7 in 711.48 seconds. Its 699.58-second P4 run includes
+  real shared-load/SID, rule/thread reload, pinyin/eSpeak/NFD, cancellation at
+  Load/Synthesize return and 1000 EN/ZH generations. The actual request ID and
+  shared load identity are now recorded and asserted, including legal hits.
+  Frozen old-v1 cache key/PCM readback across four voices passes in F4 and F5,
+  all hits with zero Load/Synthesize calls. Together with E4's cache-disabled
+  50 alternating-SID requests this establishes CACHE02-A/B/C/D. Evidence:
+  `native/stage-f5-full-tests.log`, `native/stage-f5-full-detail.log`,
+  `hit-recheck-f5/{baseline,after}/performance/`.
+- F5 config coverage repeats full Runtime reconstruction three times after the
+  serialized concurrent-field and actual Windows sharing-lock failures. F7
+  Core passes 4/4 in 4.87 seconds (`native/stage-f7-core-tests.log`).
+- F4 replaces redundant ordered-map digest lookups with one bounded hash-table
+  lookup; full directory traversal, attribute/file-identity checks, ordered
+  hashes and v1 key bytes remain unchanged. F4's three rounds (150 requests per
+  voice/mode/phase) have no aggregate p95 increase over 10%. F5 appends actual
+  load identity diagnostics and reruns the same frozen samples. Amy disk
+  aggregate p95 is 144.25 -> 175.30 ms. Its per-round baseline/after p95 values
+  are 149.70/183.19, 138.55/149.65 and 144.25/133.96 ms: not a persistent
+  three-round increase. First-round resource-validation mean is 103.46 ->
+  124.70 ms; lookup means are 16.85 -> 17.49, 16.99 -> 12.82 and 17.23 ->
+  11.26 ms. Resource validation remains the measured bottleneck; no causal
+  claim about OS noise or a final CACHE03-D PASS is made. Metadata writes fall
+  from 150 to 18 (memory) / 6 (disk), with no recounts or hash-byte rereads.
+  Both runs and earlier outliers remain in `hit-recheck-f4/` and
+  `hit-recheck-f5/`, including their `after/performance-summary.json` files.
 
 - F1/F3 continuation: desktop WM_NCDESTROY timestamps close the previously
   missing diagnostic implementation. Idle and real memory-hit paused playback
@@ -92,8 +120,8 @@ These are subcase results, not full-item or overall acceptance:
   private fixtures and 1000 native syntheses. E3 Core: 4/4 PASS. Evidence:
   `native/stage-e3-full-tests.log`, `native/stage-e3-core-tests.log`.
   The later E5 rebuild covers mapping-file failure handling and shutdown-start
-  ordering; targeted results are `native/stage-e5-tests.log`. No native adapter
-  or TTS/cache implementation changed after the full E3 run.
+  ordering; targeted results are `native/stage-e5-tests.log`. Later TTS/cache
+  changes are covered by the full F5 run above, not inferred from E3.
 - E2/E3 P5 uses real locked files to delete five of ten cache entries, retain
   accurate occupancy and a live PCM lease, and preserve unknown files/owner
   identity. A real child exits with code 23 before its dirty LRU timestamps are

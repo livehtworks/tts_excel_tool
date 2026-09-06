@@ -28,6 +28,18 @@ Current phase: R2 safety/interaction/cache source handoff with incomplete compos
 
 ## Verification And Remaining Acceptance
 
+- F5 full Release passes 7/7 in 711.48 seconds, including the real native
+  cancellation/identity contracts and 1000 EN/ZH generations. F7 Core passes
+  4/4 in 4.87 seconds. Configuration restart coverage now repeats three times.
+  Audio diagnostics retain logical request and shared load identity separately;
+  frozen old-v1 cache keys/PCM and zero-engine-call hits pass for all four voices.
+  The bounded shared digest lookup now uses one hash-table lookup, with the
+  complete resource enumeration/attribute validation unchanged. F4's three-round
+  hit recheck has no aggregate p95 increase over 10%; F5 has an Amy disk outlier
+  concentrated in its first round (183.19/149.65/133.96 ms versus baseline
+  149.70/138.55/144.25 ms). It is retained for investigation, not a performance
+  PASS. Detailed evidence is in the current R2 review document.
+
 - F1/F3 continuation: native window-destruction timestamps now exist. Idle and
   real paused-playback close exit without a process remaining; the user confirms
   the 47-row English sequence sounds normal. Full-registry GUI selects Amy and
@@ -58,4 +70,4 @@ Current phase: R2 safety/interaction/cache source handoff with incomplete compos
 - Pending user verification: human listening; the full cold/warm playback/control/close and live clear matrix; rapid file/sheet/header changes; multi-language edit/range/cursor combinations; close/cancel/reopen during background work. Automated portions of these composite cases are documented separately, not promoted to full PASS.
 - Arabic/Spanish resource blockers are resolved by preparing the already downloaded weights; no voice substitution or bulk redownload was performed. New language listening/business acceptance and actual ASR accuracy remain NOT_RUN where recognizer output or human assessment has not been supplied.
 - Evidence limitation: original workbook preflight hash and isolated review/model/junction protections passed, but no full pre-task hash inventory of all established production/backup files was recorded. This cannot be reconstructed retrospectively.
-- The previous source handoff was committed/pushed as `5b7bee0`. The latest request authorizes the R2 source commit/push, but not established runtime replacement. Baseline/final builds and application directories are isolated outside the repository. No user-owned running review process is stopped. Active desktop input interrupted E1 GUI automation; its unsaved isolated session remains open rather than being discarded.
+- The previous source handoff was committed/pushed as `5b7bee0`. The latest request authorizes the R2 source commit/push, but not established runtime replacement. Baseline/final builds and application directories are isolated outside the repository. No user-owned running review process is stopped. E1 automation was interrupted without discarding its session; it was no longer present when this continuation resumed. This continuation's F1/F5/F6 comparison windows closed normally after their exports.

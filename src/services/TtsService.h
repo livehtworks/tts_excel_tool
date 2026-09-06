@@ -6,7 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <string_view>
-#include <map>
+#include <unordered_map>
 #include <stop_token>
 #include <functional>
 
@@ -16,7 +16,7 @@ struct TtsTimings {
     double key_build_ms{}, model_validation_ms{}, lookup_ms{}, model_load_ms{}, synth_ms{}, cache_read_ms{}, cache_write_ms{}, audio_prepare_ms{};
     std::uint64_t load_call_delta{}, synth_call_delta{};
     std::uint64_t resource_enumerations{}, resource_attributes{}, resource_hash_bytes{};
-    std::string key, source;
+    std::string key, source, logical_model_id, model_load_identity;
 };
 struct PreparedAudio { std::shared_ptr<const AudioBuffer> audio; TtsTimings timings; };
 
@@ -45,7 +45,7 @@ private:
     std::string active_identity_;
     std::unique_ptr<AudioCache> cache_;
     struct Fingerprint { std::string snapshot, digest; };
-    std::map<std::filesystem::path, Fingerprint> file_digests_;
+    std::unordered_map<std::filesystem::path, Fingerprint> file_digests_;
     std::uint64_t resource_enumerations_{}, resource_attributes_{}, resource_hash_bytes_{};
 };
 

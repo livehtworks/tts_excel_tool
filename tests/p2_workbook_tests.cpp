@@ -793,7 +793,7 @@ static void TestRuntimeSaveOrderingAndControlledShutdown() {
     REQUIRE(was_waiting); REQUIRE(job_rejected); REQUIRE(runtime.ShutdownComplete());
     runtime.Shutdown();
     }
-    {
+    for(int restart=0;restart<3;++restart) {
         ApplicationRuntime restarted(root);
         const auto restored=restarted.ConfigSnapshot();
         REQUIRE(restored.compare.profile_id=="asr_cer_v1");
@@ -805,7 +805,7 @@ static void TestRuntimeSaveOrderingAndControlledShutdown() {
         restarted.Shutdown();
         REQUIRE(restarted.ShutdownComplete());
     }
-    std::cout << "PASS runtime save ordering: delayed old save, IO barrier, field rollback, complete runtime restart\n";
+    std::cout << "PASS runtime save ordering: delayed old save, IO barrier, field rollback, three complete runtime restarts\n";
 }
 #endif
 
