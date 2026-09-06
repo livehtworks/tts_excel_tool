@@ -19,6 +19,7 @@ option(ADAYO_WITH_OPENXLSX "Enable OpenXLSX workbook reader" OFF)
 option(ADAYO_WITH_LIBXLSXWRITER "Enable libxlsxwriter exporter" OFF)
 option(ADAYO_WITH_JSON_CONFIG "Enable nlohmann-json config store" OFF)
 set(ADAYO_SHERPA_ONNX_ROOT "" CACHE PATH "Root directory of a pinned sherpa-onnx native package")
+set(ADAYO_ONNXRUNTIME_INCLUDE_DIR "" CACHE PATH "Headers matching the ONNX Runtime shipped with the pinned Sherpa package")
 set(ADAYO_TEST_MODELS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/dist/AdayoCorpusTool/model" CACHE PATH "Canonical accepted model root used by TTS integration tests")
 if(NOT ADAYO_TEST_MODELS_ROOT)
     set(ADAYO_TEST_MODELS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/dist/AdayoCorpusTool/model" CACHE PATH "Canonical accepted model root used by TTS integration tests" FORCE)
@@ -105,9 +106,16 @@ if(ADAYO_WITH_SHERPA_ONNX)
         message(FATAL_ERROR "Missing sherpa-onnx import lib: ${ADAYO_SHERPA_ONNX_IMPORT_LIB}")
     endif()
     add_library(adayo_sherpa_adapter STATIC src/adapters/tts/SherpaOnnxTtsEngine.cpp)
+    if(NOT ADAYO_ONNXRUNTIME_INCLUDE_DIR)
+        find_path(ADAYO_ORT_HEADERS onnxruntime_c_api.h HINTS "${ADAYO_SHERPA_ONNX_INCLUDE_DIR}")
+        set(ADAYO_ONNXRUNTIME_INCLUDE_DIR "${ADAYO_ORT_HEADERS}")
+    endif()
+    if(NOT EXISTS "${ADAYO_ONNXRUNTIME_INCLUDE_DIR}/onnxruntime_c_api.h")
+        message(FATAL_ERROR "Native admission requires matching ONNX Runtime headers: set ADAYO_ONNXRUNTIME_INCLUDE_DIR. Do not substitute a different runtime DLL.")
+    endif()
     target_include_directories(adayo_sherpa_adapter PUBLIC src)
-    target_include_directories(adayo_sherpa_adapter PRIVATE "${ADAYO_SHERPA_ONNX_INCLUDE_DIR}")
-    target_link_libraries(adayo_sherpa_adapter PUBLIC adayo_core "${ADAYO_SHERPA_ONNX_IMPORT_LIB}")
+    target_include_directories(adayo_sherpa_adapter PRIVATE "${ADAYO_SHERPA_ONNX_INCLUDE_DIR}" "${ADAYO_ONNXRUNTIME_INCLUDE_DIR}")
+    target_link_libraries(adayo_sherpa_adapter PUBLIC adayo_core "${ADAYO_SHERPA_ONNX_IMPORT_LIB}" "${ADAYO_SHERPA_ONNX_LIB_DIR}/onnxruntime.lib")
     target_compile_definitions(adayo_sherpa_adapter PUBLIC ADAYO_HAS_SHERPA_ONNX=1)
 endif()
 
@@ -152,7 +160,7 @@ if(ADAYO_WITH_LIBXLSXWRITER)
 endif()
 
 if(ADAYO_BUILD_DESKTOP)
-    find_package(wxWidgets REQUIRED COMPONENTS core base adv)
+    find_package(wxWidgets REQUIRED COMPONENTS core base adv richtext)
     include(${wxWidgets_USE_FILE})
 
     add_executable(AdayoCorpusTool WIN32
@@ -161,6 +169,7 @@ if(ADAYO_BUILD_DESKTOP)
         src/ui/MainFrame.cpp
         src/ui/TtsPanel.cpp
         src/ui/CorpusMappingPanel.cpp
+        src/ui/VoiceSelectionDialog.cpp
         src/ui/CorpusRunPanel.cpp
         src/ui/CompareGridTable.cpp
         src/ui/ComparePanel.cpp
@@ -236,6 +245,11 @@ if(ADAYO_BUILD_TESTS)
         target_compile_definitions(adayo_p2_tests PRIVATE
             ADAYO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
         add_test(NAME adayo_p2_tests COMMAND adayo_p2_tests)
+        if(ADAYO_WITH_SHERPA_ONNX AND ADAYO_WITH_MINIAUDIO)
+            target_sources(adayo_p2_tests PRIVATE src/app/ApplicationRuntime.cpp)
+            target_link_libraries(adayo_p2_tests PRIVATE adayo_sherpa_adapter adayo_audio_adapter)
+            target_compile_definitions(adayo_p2_tests PRIVATE ADAYO_CAN_TEST_RUNTIME=1)
+        endif()
     endif()
 
     if(ADAYO_WITH_SHERPA_ONNX AND ADAYO_WITH_JSON_CONFIG)
@@ -258,5 +272,14 @@ if(ADAYO_BUILD_TESTS)
                 "${ADAYO_SHERPA_ONNX_LIB_DIR}/onnxruntime_providers_shared.dll"
                 "$<TARGET_FILE_DIR:adayo_p4_tts_tests>")
         add_test(NAME adayo_p4_tts_tests COMMAND adayo_p4_tts_tests)
+    endif()
+    if(MSVC)
+        # Exercise filesystem IO with the same UTF-8/long-path contract as the desktop.
+        foreach(test_target adayo_core_tests adayo_p5_playback_tests adayo_p8_moss_blocked_tests
+                adayo_p6_compare_tests adayo_p7_export_tests adayo_p2_tests)
+            if(TARGET ${test_target})
+                target_sources(${test_target} PRIVATE src/app/AdayoCorpusTool.exe.manifest)
+            endif()
+        endforeach()
     endif()
 endif()

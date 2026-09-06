@@ -147,6 +147,37 @@ static void TestReferenceEditInvalidatesRawRowResultsOnly() {
     REQUIRE(session.view.rows[2][3] == "✔");
 }
 
+static void TestSessionRevisionAndExportIdentity() {
+    CorpusViewService service;
+    auto make=[&] { return service.CreateSession({{"reference","hello\nworld"}}, {
+        {0,"Reference","A",ColumnRole::Reference,"",""},
+        {1,"English","B",ColumnRole::Play,"en-US","sherpa-vits"}}); };
+    auto session=make();
+    REQUIRE(session.session_id!=0); REQUIRE(!session.Dirty());
+    service.UpdateDisplayCell(session,0,2,"hello");
+    REQUIRE(session.revision==0);
+    const auto rows=session.view.rows;
+    bool rejected=false;
+    try { service.UpdateDisplayCell(session,0,0,"index"); } catch(const std::exception&) { rejected=true; }
+    REQUIRE(rejected); REQUIRE(session.revision==0); REQUIRE(session.view.rows==rows);
+    for(int i=0;i<5;++i) service.CycleResult(session,0,3);
+    REQUIRE(session.revision==5); REQUIRE(session.Dirty());
+    const auto snapshot_revision=session.revision;
+    service.UpdateDisplayCell(session,0,2,"edited");
+    REQUIRE(session.revision==6);
+    REQUIRE(service.MarkExported(session,session.session_id,snapshot_revision));
+    REQUIRE(session.exported_revision==5); REQUIRE(session.Dirty());
+    REQUIRE(service.MarkExported(session,session.session_id,6)); REQUIRE(!session.Dirty());
+    REQUIRE(service.MarkExported(session,session.session_id,5)); REQUIRE(session.exported_revision==6);
+    auto next=make();
+    REQUIRE(next.session_id!=session.session_id);
+    service.CycleResult(next,0,3);
+    REQUIRE(!service.MarkExported(next,session.session_id,6)); REQUIRE(next.Dirty());
+    REQUIRE(!service.MarkExported(next,next.session_id,2)); REQUIRE(next.exported_revision==0);
+    service.UpdateDisplayCell(next,0,1,"new reference");
+    REQUIRE(next.revision==2); REQUIRE(next.view.rows[0][3].empty());
+}
+
 static void TestAtomicWriteFaults() {
     const auto root=test::IsolatedRoot()/"io-faults";
     std::filesystem::create_directory(root);
@@ -195,6 +226,7 @@ int main() {
     return test::RunTestMain("adayo_core_tests", [] {
         TestUtf8();
         TestAtomicWriteFaults();
+        TestSessionRevisionAndExportIdentity();
         TestSimilarityUsesCodepoints();
         TestDiff();
         TestSequenceAlignmentMissing();

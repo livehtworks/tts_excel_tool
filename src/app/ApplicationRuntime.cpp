@@ -8,9 +8,9 @@
 
 namespace adayo {
 
-ApplicationRuntime::ApplicationRuntime(std::filesystem::path exe_dir)
+ApplicationRuntime::ApplicationRuntime(std::filesystem::path exe_dir, AtomicFileOperations* config_io)
     : logger_(exe_dir / "logs"),
-      config_store_(exe_dir / "config" / "config.json"),
+      config_store_(exe_dir / "config" / "config.json",config_io),
       model_registry_(exe_dir / "model" / "sherpa"),
       workbook_service_(std::make_unique<WorkbookService>(std::make_unique<OpenXlsxWorkbookReader>())),
       playback_service_(tts_service_, audio_player_, [this](const std::string& error) {
@@ -45,6 +45,10 @@ ApplicationRuntime::ApplicationRuntime(std::filesystem::path exe_dir)
         logger_.Warn("config", config_load_message_);
     }
     tts_service_.SetEngine(std::make_unique<SherpaOnnxTtsEngine>());
+    tts_service_.SetNativeReturnHandler([this](std::string_view operation) {
+        logger_.Info("lifecycle","native_returned operation="+std::string(operation)+",steady_ns="+std::to_string(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()));
+    });
     tts_service_.InitializeCache(exe_dir / "cache" / "tts-v1", config_.audio_cache);
     if (!tts_service_.Cache()->Stats().warning.empty()) logger_.Warn("cache", tts_service_.Cache()->Stats().warning);
     model_scan_ = model_registry_.ScanSherpaModelsWithDiagnostics();
@@ -60,15 +64,48 @@ ApplicationRuntime::~ApplicationRuntime() {
 }
 
 void ApplicationRuntime::Shutdown() {
-    if (shutdown_) return;
-    shutdown_ = true;
-    logger_.Info("app", "shutdown begin");
-    background_worker_.Stop(StopMode::DiscardPending);
-    playback_service_.Shutdown();
-    audio_player_.Stop();
-    tts_service_.Unload();
-    logger_.Info("app", "shutdown complete");
-    logger_.Close();
+    RequestShutdown();
+    std::lock_guard join_lock(shutdown_join_mutex_);
+    if(shutdown_worker_.get_id()==std::this_thread::get_id())
+        throw std::logic_error("Runtime cannot join its shutdown task");
+    if(shutdown_worker_.joinable()) shutdown_worker_.join();
+}
+
+std::string ApplicationRuntime::ShutdownStatus() const {
+    std::lock_guard lock(shutdown_mutex_);
+    return shutdown_status_;
+}
+
+void ApplicationRuntime::RequestShutdown() {
+    std::lock_guard lock(shutdown_mutex_);
+    if(shutdown_started_) return;
+    shutdown_status_="正在停止，等待当前原生操作返回";
+    shutdown_worker_=std::jthread([this] {
+        // Do not join until the caller has published cancellation under this mutex.
+        { std::lock_guard start_lock(shutdown_mutex_); }
+        try {
+            background_worker_.Stop(StopMode::DiscardPending);
+            playback_service_.Shutdown();
+            logger_.Info("lifecycle","worker_joined steady_ns="+std::to_string(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()));
+            audio_player_.Stop();
+            if(tts_service_.Cache()) tts_service_.Cache()->FlushUsage();
+            tts_service_.Unload();
+            logger_.Info("app","shutdown complete");
+            logger_.Close();
+            { std::lock_guard status_lock(shutdown_mutex_); shutdown_status_="停止完成"; }
+            shutdown_complete_.store(true);
+        } catch(const std::exception& ex) {
+            logger_.Error("lifecycle",ex.what());
+            std::lock_guard status_lock(shutdown_mutex_);
+            shutdown_status_="停止未完成："+std::string(ex.what());
+        }
+    });
+    shutdown_started_=true;
+    logger_.Info("lifecycle","cancel_requested steady_ns="+std::to_string(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()));
+    background_worker_.RequestStop(StopMode::DiscardPending);
+    playback_service_.RequestShutdown();
 }
 
 AppConfig ApplicationRuntime::ConfigSnapshot() const {
@@ -84,13 +121,27 @@ void ApplicationRuntime::UpdateConfig(const std::function<void(AppConfig&)>& upd
     update(config_);
 }
 
-void ApplicationRuntime::SaveConfig() {
-    AppConfig snapshot;
+void ApplicationRuntime::SaveConfig(const std::function<void(AppConfig&)>& update,
+    const std::function<void(AppConfig&, const AppConfig&)>& rollback) {
+    // Order is save mutex -> snapshot mutex; disk IO never holds config_mutex_.
+    std::lock_guard save_lock(config_save_mutex_);
+    AppConfig snapshot, previous;
     {
         std::lock_guard lock(config_mutex_);
         snapshot = config_;
+        if(update) {
+            if(!config_save_allowed_) throw std::runtime_error("当前配置不可覆盖保存: "+config_load_message_);
+            if(!rollback) throw std::invalid_argument("A persisted field update requires field-scoped rollback");
+            previous=snapshot;
+            update(snapshot);
+            config_=snapshot;
+        }
     }
-    config_store_.Save(snapshot);
+    try { config_store_.Save(snapshot); }
+    catch(...) {
+        if(update) { std::lock_guard lock(config_mutex_); rollback(config_,previous); }
+        throw;
+    }
 }
 
 } // namespace adayo

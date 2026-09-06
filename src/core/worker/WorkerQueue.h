@@ -25,6 +25,7 @@ public:
     WorkerQueue& operator=(const WorkerQueue&) = delete;
 
     void Submit(Task task);
+    void RequestStop(StopMode mode = StopMode::Drain);
     void Stop(StopMode mode = StopMode::Drain);
 
 private:
@@ -34,6 +35,8 @@ private:
     std::condition_variable_any cv_;
     std::queue<Task> tasks_;
     std::jthread worker_;
+    std::stop_source stop_source_;
+    std::mutex join_mutex_;
     ErrorHandler on_unhandled_task_error_;
     bool accepting_{true};
     bool stopped_{false};

@@ -16,6 +16,8 @@ enum class ResultCycleState {
 };
 
 struct CorpusSession {
+    std::uint64_t session_id{}, revision{}, exported_revision{};
+    bool Dirty() const noexcept { return revision != exported_revision; }
     std::vector<std::vector<std::string>> source_rows;
     std::vector<SelectedColumn> selected_columns;
     RuntimeView view;
@@ -42,8 +44,11 @@ public:
     CellEditImpact UpdateDisplayCell(CorpusSession& session, std::size_t display_row, std::size_t display_column, const std::string& value) const;
     ResultCycleState CycleResult(CorpusSession& session, std::size_t display_row, std::size_t display_column) const;
     void Rebuild(CorpusSession& session) const;
+    bool MarkExported(CorpusSession& session, std::uint64_t session_id, std::uint64_t revision) const;
 
 private:
+    CellEditImpact UpdateDisplayCellInPlace(CorpusSession& session, std::size_t row, std::size_t column, const std::string& value) const;
+    ResultCycleState CycleResultInPlace(CorpusSession& session, std::size_t row, std::size_t column) const;
     static ResultIdentity ResultKey(const RuntimeView& view, std::size_t display_row, std::size_t result_display_column);
     static void InvalidateResultSegment(CorpusSession& session, std::size_t raw_row, std::size_t source_column, std::size_t segment);
     static void InvalidateResultsForRawRow(CorpusSession& session, std::size_t raw_row);

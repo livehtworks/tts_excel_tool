@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <utility>
+#include <stdexcept>
 
 namespace adayo::ui {
 namespace {
@@ -37,21 +38,18 @@ CompareGridTable::CompareGridTable(std::shared_ptr<const std::vector<CompareRepo
 }
 
 int CompareGridTable::GetNumberRows() {
-    std::size_t rows = 0;
-    for (const auto& group : *reports_) {
-        rows = (std::max)(rows, group.rows.size());
-    }
-    return static_cast<int>(rows);
+    return current_group_<reports_->size() ? static_cast<int>((*reports_)[current_group_].rows.size()) : 0;
 }
 
 int CompareGridTable::GetNumberCols() {
-    return static_cast<int>(reports_->size() * 4);
+    return reports_->empty() ? 0 : 4;
 }
 
 wxString CompareGridTable::GetValue(int row, int col) {
     if (row < 0 || col < 0) return {};
-    const auto group_index = static_cast<std::size_t>(col / 4);
-    const auto offset = col % 4;
+    if(col>=4) return {};
+    const auto group_index = current_group_;
+    const auto offset = col;
     if (group_index >= reports_->size()) return {};
     const auto& group = (*reports_)[group_index];
     if (static_cast<std::size_t>(row) >= group.rows.size()) return {};
@@ -73,7 +71,8 @@ void CompareGridTable::SetValue(int, int, const wxString&) {}
 
 wxString CompareGridTable::GetColLabelValue(int col) {
     if (col < 0) return {};
-    const auto group_index = static_cast<std::size_t>(col / 4);
+    if(col>=4) return {};
+    const auto group_index = current_group_;
     if (group_index >= reports_->size()) return {};
     const auto prefix = (*reports_)[group_index].label;
     const auto suffix = col%4==2?CompareService::ValueLabel((*reports_)[group_index].options.metric):std::string(ColumnSuffix(col%4));
@@ -86,6 +85,12 @@ void CompareGridTable::SetReports(std::shared_ptr<const std::vector<CompareRepor
     if (!reports_) {
         reports_ = std::make_shared<const std::vector<CompareReportGroup>>();
     }
+    if(current_group_>=reports_->size()) current_group_=0;
+}
+
+void CompareGridTable::SetCurrentGroup(std::size_t group) {
+    if(group>=reports_->size()) throw std::out_of_range("Comparison report group");
+    current_group_=group;
 }
 
 } // namespace adayo::ui

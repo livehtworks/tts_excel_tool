@@ -5,8 +5,10 @@
 #include <filesystem>
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 #include <wx/panel.h>
+#include <wx/collpane.h>
 
 class wxButton;
 class wxCheckBox;
@@ -17,6 +19,7 @@ class wxListBox;
 class wxSpinCtrlDouble;
 class wxStaticText;
 class wxTextCtrl;
+class wxRichTextCtrl;
 
 namespace adayo {
 class ApplicationRuntime;
@@ -31,18 +34,28 @@ public:
     void BeginShutdown();
 private:
     struct CompareInputGroup {
+        std::uint64_t id{};
         std::string label;
         std::filesystem::path reference_path;
         std::filesystem::path actual_path;
     };
 
     void OnOpenReference(wxCommandEvent& event);
+    void LayoutOptions();
     void OnOpenActual(wxCommandEvent& event);
     void OnAddGroup(wxCommandEvent& event);
     void OnRemoveGroup(wxCommandEvent& event);
     void OnCompare(wxCommandEvent& event);
     void OnExport(wxCommandEvent& event);
     void OnInputChanged(wxCommandEvent& event);
+    bool ApplyGroupDraft();
+    bool ResolveGroupDraft();
+    void LoadGroupDraft(std::optional<std::uint64_t> id);
+    void UpdateDraftState();
+    void SelectInputGroup();
+    bool CommitOptions();
+    void ObserveOptions();
+    void ShowDiffDetails(int row);
 
     void MarkInputChanged();
     void InvalidateReport();
@@ -79,6 +92,20 @@ private:
     std::vector<wxWindow*> option_controls_;
     bool applying_options_{false};
     bool comparing_{false};
+    bool filling_draft_{false}, draft_dirty_{false}, options_valid_{true};
+    std::uint64_t next_group_id_{};
+    std::optional<std::uint64_t> editing_group_id_;
+    std::optional<CompareOptions> observed_options_;
+    wxButton* new_group_{};
+    wxButton* apply_group_{};
+    wxButton* cancel_group_{};
+    wxCollapsiblePane* advanced_{};
+    wxChoice* result_group_{};
+    wxStaticText* result_summary_{};
+    wxRichTextCtrl* reference_detail_{};
+    wxRichTextCtrl* actual_detail_{};
+    wxStaticText* reference_detail_label_{};
+    wxStaticText* actual_detail_label_{};
     wxButton* add_group_{};
     wxButton* remove_group_{};
     wxButton* reference_browse_{};

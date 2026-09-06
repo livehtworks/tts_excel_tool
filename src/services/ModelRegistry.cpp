@@ -1,6 +1,7 @@
 #include "services/ModelRegistry.h"
 
 #include "platform/UnicodePath.h"
+#include "platform/FileIo.h"
 
 #include <fstream>
 #include <sstream>
@@ -93,6 +94,12 @@ std::vector<TtsModelEntry> ModelRegistry::ScanSherpaModels() const {
     return ScanSherpaModelsWithDiagnostics().entries;
 }
 
+std::string VoiceValidationObservation::Status(const std::string& current_model_sha256) const {
+    if(!current_model_sha256.empty() && current_model_sha256!=model_sha256) return "历史观察已过期：权重已变化";
+    const auto identity=current_model_sha256.empty() ? "；当前身份未核对" : "；非完整当前前端证明";
+    return std::string(warnings.empty() ? "历史出声检查通过" : "曾出现音素告警")+identity;
+}
+
 ModelRegistryScanResult ModelRegistry::ScanSherpaModelsWithDiagnostics() const {
     ModelRegistryScanResult result;
     std::vector<std::filesystem::path> model_files;
@@ -139,6 +146,41 @@ ModelRegistryScanResult ModelRegistry::ScanSherpaModelsWithDiagnostics() const {
             result.invalid.push_back({model_json.parent_path(), PathToUtf8(model_json.parent_path().filename()), ex.what()});
         }
     }
+    const auto observations=models_root_.parent_path().parent_path()/"voice-validation-observations.json";
+    if(std::filesystem::exists(observations)) {
+        try {
+            RequireOrdinaryPath(observations);
+            if(std::filesystem::file_size(observations)>16*1024*1024) throw std::runtime_error("Observation file exceeds 16 MiB");
+            std::ifstream input(observations,std::ios::binary);
+            const auto document=json::parse(input);
+            if(document.at("schema_version")!=1) throw std::runtime_error("Unsupported observation schema");
+            std::unordered_map<std::string,VoiceValidationObservation> by_id;
+            for(const auto& voice:document.at("voices")) {
+                VoiceValidationObservation observation;
+                observation.observed_at=voice.at("observed_at").get<std::string>();
+                observation.run_id=voice.at("run_id").get<std::string>();
+                observation.model_sha256=voice.at("model_sha256").get<std::string>();
+                observation.frontend_rule_coverage=voice.at("frontend_rule_coverage").get<std::string>();
+                observation.evidence_scope=voice.at("evidence_scope").get<std::string>();
+                observation.warnings=voice.at("warnings").get<std::vector<std::string>>();
+                if(observation.model_sha256.size()!=64 || observation.observed_at.empty() || observation.run_id.empty())
+                    throw std::runtime_error("Incomplete observation identity");
+                if(!by_id.emplace(voice.at("model_id").get<std::string>(),std::move(observation)).second)
+                    throw std::runtime_error("Duplicate observation model ID");
+            }
+            for(auto& entry:result.entries) {
+                auto found=by_id.find(entry.id);
+                if(found==by_id.end()) {
+                    for(const auto& owner:result.entries) if(owner.root==entry.root && !owner.speakers.empty()) {
+                        found=by_id.find(owner.id); break;
+                    }
+                }
+                if(found!=by_id.end()) entry.observation=found->second;
+            }
+        } catch(const std::exception& ex) {
+            for(auto& entry:result.entries) entry.observation_error=ex.what();
+        }
+    }
     std::sort(result.entries.begin(), result.entries.end(), [](const auto& left, const auto& right) {
         return left.id < right.id;
     });
@@ -164,7 +206,7 @@ ModelRegistryScanResult ModelRegistry::ScanSherpaModelsWithDiagnostics() const {
     return result;
 }
 
-TtsModelEntry ModelRegistry::LoadModelJson(const std::filesystem::path& model_json) {
+TtsModelEntry ModelRegistry::LoadModelJson(const std::filesystem::path& model_json, const std::string& offline_transaction) {
     std::ifstream input(model_json, std::ios::binary);
     if (!input) {
         throw std::runtime_error("无法读取模型配置: " + PathToUtf8(model_json));
@@ -173,12 +215,44 @@ TtsModelEntry ModelRegistry::LoadModelJson(const std::filesystem::path& model_js
     input >> j;
 
     const auto root = model_json.parent_path();
+    const auto marker=root/".preparation-incomplete.json";
+    if(std::filesystem::exists(marker)) {
+        if(offline_transaction.empty()) throw std::runtime_error("MODEL_UPDATE_INCOMPLETE: "+PathToUtf8(marker));
+        if(model_json.filename()!=PathFromUtf8("model.pending."+offline_transaction+".json"))
+            throw std::runtime_error("Offline probe must name its transaction's pending candidate");
+        RequireOrdinaryPath(marker);
+        std::ifstream marker_input(marker,std::ios::binary);
+        const auto pending=json::parse(marker_input);
+        if(pending.at("transaction_id").get<std::string>()!=offline_transaction)
+            throw std::runtime_error("Offline transaction ID mismatch");
+        const auto journal=root.parent_path().parent_path()/".voice-transactions"/offline_transaction/"journal.json";
+        RequireOrdinaryPath(journal);
+        std::ifstream journal_input(journal,std::ios::binary);
+        const auto publication=json::parse(journal_input);
+        if(publication.at("transaction_id").get<std::string>()!=offline_transaction || publication.at("stage")!="DEPLOYED_PROBE" ||
+            std::filesystem::weakly_canonical(PathFromUtf8(publication.at("target").get<std::string>()))!=std::filesystem::weakly_canonical(root))
+            throw std::runtime_error("Offline probe requires the active deployed-probe journal");
+        bool candidate_verified=false;
+        for(const auto& item:publication.at("files")) {
+            const auto path=PathFromUtf8(item.at("path").get<std::string>());
+            if(path.filename()=="model.json") continue;
+            const auto owned_root=root.parent_path().parent_path();
+            const auto relative=std::filesystem::weakly_canonical(path).lexically_relative(std::filesystem::weakly_canonical(owned_root));
+            if(relative.empty() || *relative.begin()=="..") throw std::runtime_error("Offline journal path escapes model root");
+            RequireOrdinaryPath(path);
+            if(FileSha256(path)!=item.at("candidate_sha256").get<std::string>()) throw std::runtime_error("Offline deployed resource hash mismatch");
+            if(std::filesystem::equivalent(path,model_json)) candidate_verified=true;
+        }
+        if(!candidate_verified) throw std::runtime_error("Offline candidate is absent from publication journal");
+    } else if(!offline_transaction.empty()) throw std::runtime_error("Offline probe has no active transaction marker");
     TtsModelEntry entry;
     entry.root = root;
     entry.id = RequiredString(j, "id", model_json);
     entry.display_name = j.value("display_name", entry.id);
 
     auto& c = entry.config;
+    c.resource_root=PathToUtf8(std::filesystem::weakly_canonical(root));
+    c.offline_transaction=offline_transaction;
     c.engine_id = j.value("engine_id", std::string{"sherpa-vits"});
     if (c.engine_id != "sherpa-vits") {
         throw std::runtime_error("ENGINE_MISMATCH: sherpa registry 不接受 engine_id=" + c.engine_id);

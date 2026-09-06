@@ -37,6 +37,13 @@ struct PlaybackRequest {
     double speed{1.0};
 };
 
+struct PlaybackSnapshot {
+    PlaybackState state{PlaybackState::Idle};
+    std::uint64_t request_id{};
+    std::size_t row{}, column{};
+    std::string error;
+};
+
 class PlaybackService {
 public:
     using ErrorHandler = std::function<void(const std::string&)>;
@@ -50,7 +57,9 @@ public:
     void Resume();
     void Stop();
     void Shutdown();
+    void RequestShutdown();
 
+    PlaybackSnapshot Snapshot() const;
     PlaybackState State() const;
     std::string LastError() const;
     std::size_t CurrentRow() const;

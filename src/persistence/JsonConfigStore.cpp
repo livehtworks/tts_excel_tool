@@ -306,7 +306,8 @@ void from_json(const json& j, AppConfig& config) {
     }
 }
 
-JsonConfigStore::JsonConfigStore(std::filesystem::path path) : path_(std::move(path)) {}
+JsonConfigStore::JsonConfigStore(std::filesystem::path path, AtomicFileOperations* operations)
+    : path_(std::move(path)), operations_(operations) {}
 
 AppConfig JsonConfigStore::Load() const {
     if (!std::filesystem::exists(path_)) {
@@ -370,7 +371,8 @@ void JsonConfigStore::Save(const AppConfig& config) const {
 
     json document = config;
     const auto serialized=document.dump(2);
-    WriteBinaryFileAtomically(path_,serialized.data(),serialized.size());
+    if(operations_) WriteBinaryFileAtomically(path_,serialized.data(),serialized.size(),*operations_);
+    else WriteBinaryFileAtomically(path_,serialized.data(),serialized.size());
 }
 
 } // namespace adayo

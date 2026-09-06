@@ -146,6 +146,33 @@ void CopyDirectory(const std::filesystem::path& source, const std::filesystem::p
         std::filesystem::copy_options::overwrite_existing);
 }
 
+void TestNativeAdmissionInvalidatesChangedTokens() {
+    const auto root=test::IsolatedRoot()/PathFromUtf8("准入资源变更");
+    CopyDirectory(std::filesystem::path(ADAYO_MODELS_DIR)/"sherpa/vits-piper-en_US-amy-low",root/"voice");
+    const auto model=ModelRegistry::LoadModelJson(root/"voice/model.json");
+    TtsService service; service.SetEngine(std::make_unique<SherpaOnnxTtsEngine>());
+    service.InitializeCache(root/"cache",{});
+    const TtsRequest request{"This is an admission identity test.","en-US",0,1.0};
+    const auto seed=service.Prepare(model.id,model.config,request);
+    const auto hit=service.Prepare(model.id,model.config,request);
+    REQUIRE(hit.timings.source=="memory"); REQUIRE(hit.timings.load_call_delta==0); REQUIRE(hit.timings.synth_call_delta==0);
+    REQUIRE(seed.audio->samples==hit.audio->samples);
+    const auto path=PathFromUtf8(model.config.tokens_path);
+    std::ifstream input(path,std::ios::binary);
+    const std::string original{std::istreambuf_iterator<char>(input),{}}; input.close();
+    const auto invalid=original+"_ 0\n";
+    WriteBinaryFileAtomically(path,invalid.data(),invalid.size());
+    bool rejected=false;
+    try { service.Prepare(model.id,model.config,request); }
+    catch(const std::exception& ex) { rejected=std::string(ex.what()).find("duplicate token")!=std::string::npos; }
+    REQUIRE(rejected);
+    WriteBinaryFileAtomically(path,original.data(),original.size());
+    const auto restored=service.Prepare(model.id,model.config,request);
+    REQUIRE(restored.timings.source=="memory"); REQUIRE(restored.timings.key==seed.timings.key);
+    REQUIRE(restored.timings.load_call_delta==0); REQUIRE(restored.timings.synth_call_delta==0);
+    REQUIRE(restored.audio->samples==seed.audio->samples);
+}
+
 void TestSherpaUnicodePathGate() {
     const std::filesystem::path source_root = std::filesystem::path(ADAYO_MODELS_DIR) / "sherpa";
     const auto gate_root = test::IsolatedRoot() /
@@ -255,6 +282,53 @@ void VerifyLoopback(const AudioBuffer& audio,const std::vector<float>& captured,
 #endif
 
 static int RunMain(int argc, char** argv) {
+    if (argc==6 && std::string(argv[1])=="--r2-perf") {
+        return test::RunTestMain("R2_NATIVE_PERFORMANCE",[&] {
+            const auto root=PathFromUtf8(argv[2]);
+            const auto mode=std::string(argv[3]);
+            const auto model=ModelRegistry::LoadModelJson(PathFromUtf8(argv[4]));
+            std::ifstream input(PathFromUtf8(argv[5]));
+            const auto fixture=nlohmann::json::parse(input);
+            REQUIRE(mode=="baseline" || mode=="seed" || mode=="memory" || mode=="disk" || mode=="speakers");
+            TtsService service; service.SetEngine(std::make_unique<SherpaOnnxTtsEngine>());
+            AudioCacheOptions options; options.enabled=mode!="baseline" && mode!="speakers";
+            service.InitializeCache(root/"tts-v1",options);
+            REQUIRE(service.Cache()->Stats().disk_enabled);
+            const auto start=std::chrono::steady_clock::now();
+            if(mode=="baseline") service.EnsureModelLoaded(model.id,model.config);
+            std::cout << "PREPARATION model=" << model.id << ",ms="
+                      << std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count() << '\n';
+            std::cout << "index,model,mode,speaker,key_build_ms,model_validation_ms,lookup_ms,model_load_ms,synth_ms,cache_read_ms,cache_write_ms,audio_prepare_ms,source,load_call_delta,synth_call_delta,key,pcm_sha256,resource_enumerations,resource_attributes,resource_hash_bytes,metadata_writes,recounts,eviction_scans,pin_scans\n";
+            std::size_t index=0;
+            for(const auto& sample:fixture.at("samples")) {
+                auto config=model.config;
+                const auto sid=mode=="speakers" ? sample.at("speaker").get<int>() : config.speaker_id;
+                config.speaker_id=sid;
+                const auto id=sid==model.config.speaker_id ? model.id : model.id+"::speaker-"+std::to_string(sid);
+                const TtsRequest request{sample.at("text").get<std::string>(),config.language_code,sid,1.0};
+                std::shared_ptr<const AudioBuffer> seeded;
+                if(mode=="memory") seeded=service.Prepare(id,config,request).audio;
+                const auto before=service.Cache()->Stats();
+                const auto result=service.Prepare(id,config,request);
+                const auto after=service.Cache()->Stats();
+                RequireUsableAudio(*result.audio);
+                const auto& t=result.timings;
+                if(mode=="memory" || mode=="disk") {
+                    REQUIRE(t.source==mode); REQUIRE(t.load_call_delta==0); REQUIRE(t.synth_call_delta==0);
+                } else { REQUIRE(t.source=="synth"); REQUIRE(t.synth_call_delta==1); }
+                if(seeded) REQUIRE(seeded->samples==result.audio->samples);
+                const auto hash=Sha256(std::string_view(reinterpret_cast<const char*>(result.audio->samples.data()),result.audio->samples.size()*sizeof(float)));
+                std::cout << index++ << ',' << id << ',' << mode << ',' << sid << ',' << t.key_build_ms << ','
+                    << t.model_validation_ms << ',' << t.lookup_ms << ',' << t.model_load_ms << ',' << t.synth_ms << ','
+                    << t.cache_read_ms << ',' << t.cache_write_ms << ',' << t.audio_prepare_ms << ',' << t.source << ','
+                    << t.load_call_delta << ',' << t.synth_call_delta << ',' << t.key << ',' << hash << ','
+                    << t.resource_enumerations << ',' << t.resource_attributes << ',' << t.resource_hash_bytes << ','
+                    << after.metadata_writes-before.metadata_writes << ',' << after.recounts-before.recounts << ','
+                    << after.eviction_scans-before.eviction_scans << ',' << after.pin_scans-before.pin_scans << '\n';
+            }
+            REQUIRE(index>=50);
+        });
+    }
     if (argc == 4 && std::string(argv[1]) == "--registry-probe") {
         return test::RunTestMain("adayo_downloaded_voice_registry", [&] {
             const auto scan = ModelRegistry(PathFromUtf8(argv[2])).ScanSherpaModelsWithDiagnostics();
@@ -283,9 +357,12 @@ static int RunMain(int argc, char** argv) {
             for (const auto& invalid : scan.invalid) std::cout << "DIAGNOSTIC " << invalid.id << ": " << invalid.error << '\n';
         });
     }
-    if (argc == 4 && (std::string(argv[1]) == "--voice-probe" || std::string(argv[1]) == "--voice-probe-default")) {
+    if(argc==2 && std::string(argv[1])=="--r2-admission-invalidation")
+        return test::RunTestMain("R2_NATIVE_ADMISSION_INVALIDATION",TestNativeAdmissionInvalidatesChangedTokens);
+    if ((argc == 4 && (std::string(argv[1]) == "--voice-probe" || std::string(argv[1]) == "--voice-probe-default" || std::string(argv[1])=="--voice-lease-probe")) ||
+        (argc==5 && std::string(argv[1])=="--voice-transaction-probe")) {
         return test::RunTestMain("adayo_voice_probe", [&] {
-            const auto model = ModelRegistry::LoadModelJson(PathFromUtf8(argv[2]));
+            const auto model = ModelRegistry::LoadModelJson(PathFromUtf8(argv[2]),argc==5 ? argv[4] : "");
             std::ifstream input(PathFromUtf8(argv[3]));
             const auto fixture = nlohmann::json::parse(input);
             const auto text = fixture.at(model.config.language_code).get<std::string>();
@@ -293,7 +370,7 @@ static int RunMain(int argc, char** argv) {
             service.SetEngine(std::make_unique<SherpaOnnxTtsEngine>());
             service.EnsureModelLoaded(model.id, model.config);
             auto speakers = model.speakers;
-            if (std::string(argv[1]) == "--voice-probe-default") speakers.clear();
+            if (std::string(argv[1]) == "--voice-probe-default" || argc==5) speakers.clear();
             if (speakers.empty()) speakers.emplace_back(model.config.speaker_id, "default");
             for (const auto& [id, name] : speakers) {
                 const auto audio = service.Synthesize({text, model.config.language_code, id, 1.0});
@@ -304,6 +381,10 @@ static int RunMain(int argc, char** argv) {
                 REQUIRE(energy / audio.samples.size() > 1e-8);
                 std::cout << "VOICE_OK " << model.id << " speaker=" << id << " rate=" << audio.sample_rate
                           << " frames=" << audio.samples.size() << " rms=" << std::sqrt(energy / audio.samples.size()) << '\n' << std::flush;
+            }
+            if(std::string(argv[1])=="--voice-lease-probe") {
+                std::cout<<"NATIVE_LEASE_READY\n"<<std::flush;
+                std::string release; std::getline(std::cin,release);
             }
         });
     }
@@ -371,6 +452,7 @@ static int RunMain(int argc, char** argv) {
         // espeak has process-global initialization: Unicode paths must be first,
         // otherwise an earlier ASCII path can conceal an encoding failure.
         TestSherpaUnicodePathGate();
+        TestNativeAdmissionInvalidatesChangedTokens();
         TestSherpaSmokeAndSwitching();
         TestSherpaRepeatedGeneration();
     });

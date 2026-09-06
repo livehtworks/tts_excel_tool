@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <vector>
+#include <functional>
 
 #include <wx/timer.h>
 #include <wx/panel.h>
@@ -20,6 +21,7 @@ class wxGridEvent;
 class wxSpinCtrl;
 class wxSpinCtrlDouble;
 class wxStaticText;
+class wxTextCtrl;
 
 namespace adayo {
 class ApplicationRuntime;
@@ -30,7 +32,9 @@ class CorpusRunPanel final : public wxPanel {
 public:
     CorpusRunPanel(wxWindow* parent, ApplicationRuntime& runtime);
 
-    void SetSession(CorpusSession session);
+    void SetSession(CorpusSession session, std::function<void()> installed = {});
+    void RequestLeave(std::function<void()> action);
+    void SetSessionInstalledHandler(std::function<void()> handler) { session_installed_=std::move(handler); }
     const std::optional<CorpusSession>& Session() const { return session_; }
     void BeginShutdown();
 
@@ -43,19 +47,30 @@ private:
     void HighlightPlaybackCell(std::size_t row, std::size_t column);
     void UpdatePlaybackUi();
     void OnExport(wxCommandEvent& event);
+    bool StartExport();
+    void FinishExport(std::uint64_t session_id, std::uint64_t revision, const std::string& error);
     void OnPlay(wxCommandEvent& event);
     void OnPause(wxCommandEvent& event);
     void OnResume(wxCommandEvent& event);
     void OnStop(wxCommandEvent& event);
     void OnPlaybackTimer(wxTimerEvent& event);
     void OnPlaybackSettingsChanged(wxCommandEvent& event);
-    void OnCellChanged(wxGridEvent& event);
+    void ApplyCellEdit(int row,int column,const std::string& value);
+    void EditCell();
+    void ShowCellDetails(int row,int column);
+    void ClearPlaybackHighlight();
     void OnCellClick(wxGridEvent& event);
     void UpdateCacheUi();
     wxCheckBox* cache_enabled_{};
     wxSpinCtrl* cache_limit_{};
     wxStaticText* cache_status_{};
     wxButton* clear_cache_{};
+    wxButton* apply_cache_{};
+    wxCheckBox* follow_playback_{};
+    wxButton* edit_cell_{};
+    wxTextCtrl* cell_details_{};
+    std::optional<std::pair<int,int>> highlighted_cell_;
+    bool cache_busy_{};
 
     ApplicationRuntime& runtime_;
     CorpusViewService service_;
@@ -80,6 +95,8 @@ private:
     bool closing_{false};
     PlaybackState last_playback_state_{PlaybackState::Idle};
     std::uint64_t playback_ui_generation_{0};
+    std::uint64_t playback_session_id_{0}, playback_request_id_{0};
+    std::function<void()> pending_action_, session_installed_;
 };
 
 } // namespace adayo::ui

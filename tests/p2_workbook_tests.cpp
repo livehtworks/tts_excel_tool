@@ -12,6 +12,10 @@
 #include <cstdlib>
 #include <map>
 #include <chrono>
+#include <future>
+#ifdef ADAYO_CAN_TEST_RUNTIME
+#include "app/ApplicationRuntime.h"
+#endif
 
 #include "TestCheck.h"
 
@@ -494,6 +498,33 @@ void TestModelRegistryExpandsCompleteSpeakers() {
     REQUIRE(ModelRegistry(root).ScanSherpaModels().empty());
 }
 
+void TestVoiceObservationDoesNotGrantAdmission() {
+    const auto app=test::IsolatedRoot()/"observation-app";
+    const auto root=app/"model"/"sherpa";
+    WriteMinimalModel(root/"multi","multi");
+    REQUIRE(!ModelRegistry(root).ScanSherpaModels().at(0).observation);
+    nlohmann::json observation={{"model_id","multi"},{"observed_at","2026-09-06T00:00:00Z"},
+        {"run_id","isolated-test"},{"model_sha256",std::string(64,'a')},{"frontend_rule_coverage","weight only"},
+        {"evidence_scope","finite PCM, not listening acceptance"},{"warnings",nlohmann::json::array()}};
+    auto document=nlohmann::json{{"schema_version",1},{"voices",nlohmann::json::array({observation})}};
+    const auto save=[&] { const auto bytes=document.dump(); WriteBinaryFile(app/"voice-validation-observations.json",bytes.data(),bytes.size()); };
+    save();
+    auto scan=ModelRegistry(root).ScanSherpaModelsWithDiagnostics();
+    REQUIRE(scan.invalid.empty()); REQUIRE(scan.entries.size()==1); REQUIRE(scan.entries[0].observation);
+    REQUIRE(scan.entries[0].observation->Status().find("当前身份未核对")!=std::string::npos);
+    REQUIRE(scan.entries[0].observation->Status(std::string(64,'a')).find("非完整当前前端证明")!=std::string::npos);
+    REQUIRE(scan.entries[0].observation->Status(std::string(64,'b')).find("已过期")!=std::string::npos);
+    document["voices"][0]["warnings"]={"Skip unknown phoneme: fixture"}; save();
+    REQUIRE(ModelRegistry(root).ScanSherpaModels()[0].observation->Status().find("曾出现音素告警")!=std::string::npos);
+    document["schema_version"]=99; save();
+    scan=ModelRegistry(root).ScanSherpaModelsWithDiagnostics();
+    REQUIRE(scan.entries.size()==1); REQUIRE(!scan.entries[0].observation); REQUIRE(!scan.entries[0].observation_error.empty());
+    WriteBinaryFile(root/"multi"/".preparation-incomplete.json","{}",2);
+    scan=ModelRegistry(root).ScanSherpaModelsWithDiagnostics();
+    REQUIRE(scan.entries.empty()); REQUIRE(scan.invalid.size()==1);
+    REQUIRE(scan.invalid[0].error.find("MODEL_UPDATE_INCOMPLETE")!=std::string::npos);
+}
+
 void TestCorpusViewEditAndResultCycle() {
     OpenXlsxWorkbookReader reader;
     const auto vehicle = reader.ReadSheet(FixturePath(), "Vehicle", 2);
@@ -649,12 +680,102 @@ void TestEditImpactWhenShapeUnchanged() {
     REQUIRE(impact.segment_structure_changed); REQUIRE(impact.display_rows.size()==3); REQUIRE(!session.view.rows[1][5].empty());
 }
 
+#ifdef ADAYO_CAN_TEST_RUNTIME
+static void TestRuntimeSaveOrderingAndControlledShutdown() {
+    const auto root=test::IsolatedRoot()/"runtime-lifecycle";
+    std::filesystem::create_directory(root);
+    struct Io final:AtomicFileOperations {
+        std::promise<void> entered,release;
+        std::shared_future<void> released=release.get_future().share();
+        std::atomic<bool> block{},fail{};
+        std::size_t Write(std::FILE* file,const void* data,std::size_t size) override {
+            if(block.exchange(false)) { entered.set_value(); released.wait(); }
+            return AtomicFileOperations::Write(file,data,size);
+        }
+        void Replace(const std::filesystem::path& from,const std::filesystem::path& to) override {
+            if(fail.exchange(false)) throw std::runtime_error("deterministic config replace failure");
+            AtomicFileOperations::Replace(from,to);
+        }
+    } io;
+    ApplicationRuntime runtime(root,&io);
+    std::promise<void> old_requested,allow_old;
+    auto allowed=allow_old.get_future().share();
+    auto old=std::async(std::launch::async,[&] { old_requested.set_value(); allowed.wait(); runtime.SaveConfig(); });
+    old_requested.get_future().get();
+    runtime.UpdateConfig([](AppConfig& config) { config.audio_cache.disk_limit_bytes=1024ull*1024*1024; });
+    runtime.UpdateConfig([](AppConfig& config) { config.compare=CompareService::Preset("asr_cer_v1"); });
+    runtime.SaveConfig();
+    allow_old.set_value(); old.get();
+    JsonConfigStore store(root/"config/config.json");
+    REQUIRE(store.Load().audio_cache.disk_limit_bytes==1024ull*1024*1024);
+    REQUIRE(store.Load().compare.profile_id=="asr_cer_v1");
+
+    io.block=true;
+    auto saving=std::async(std::launch::async,[&] { runtime.SaveConfig(); });
+    io.entered.get_future().get();
+    auto editing=std::async(std::launch::async,[&] {
+        runtime.UpdateConfig([](AppConfig& config) { config.last_sheet="isolated"; });
+    });
+    const bool update_during_io=editing.wait_for(std::chrono::seconds(2))==std::future_status::ready;
+    io.release.set_value(); saving.get(); editing.get();
+    REQUIRE(update_during_io);
+    runtime.SaveConfig();
+    const auto saved_hash=FileSha256(store.Path());
+    io.fail=true;
+    runtime.UpdateConfig([](AppConfig& config) { config.audio_cache.enabled=false; });
+    bool failed=false;
+    try { runtime.SaveConfig(); } catch(const std::exception&) { failed=true; }
+    REQUIRE(failed); REQUIRE(FileSha256(store.Path())==saved_hash);
+    REQUIRE(runtime.ConfigSnapshot().compare.profile_id=="asr_cer_v1");
+    runtime.SaveConfig();
+    REQUIRE(!store.Load().audio_cache.enabled); REQUIRE(store.Load().last_sheet=="isolated");
+
+    io.entered=std::promise<void>{}; io.release=std::promise<void>{};
+    io.released=io.release.get_future().share(); io.block=true; io.fail=true;
+    auto failed_update=std::async(std::launch::async,[&] {
+        try {
+            runtime.SaveConfig([](AppConfig& config) { config.compare=CompareService::Preset("strict_rows_v1"); },
+                [](AppConfig& config,const AppConfig& before) { config.compare=before.compare; });
+            return false;
+        } catch(const std::runtime_error&) { return true; }
+    });
+    io.entered.get_future().get();
+    runtime.UpdateConfig([](AppConfig& config) { config.last_sheet="concurrent-field"; });
+    std::promise<void> next_requested;
+    auto next=std::async(std::launch::async,[&] {
+        next_requested.set_value();
+        runtime.SaveConfig([](AppConfig& config) { config.audio_cache.enabled=true; },
+            [](AppConfig& config,const AppConfig& before) { config.audio_cache=before.audio_cache; });
+    });
+    next_requested.get_future().get(); io.release.set_value();
+    REQUIRE(failed_update.get()); next.get();
+    REQUIRE(runtime.ConfigSnapshot().compare.profile_id=="asr_cer_v1");
+    REQUIRE(store.Load().compare.profile_id=="asr_cer_v1");
+    REQUIRE(store.Load().last_sheet=="concurrent-field"); REQUIRE(store.Load().audio_cache.enabled);
+
+    std::promise<void> job_entered,job_release;
+    auto job_released=job_release.get_future().share();
+    runtime.BackgroundJobs().Submit([&](std::stop_token) { job_entered.set_value(); job_released.wait(); });
+    job_entered.get_future().get();
+    runtime.RequestShutdown(); runtime.RequestShutdown();
+    const bool was_waiting=!runtime.ShutdownComplete();
+    bool job_rejected=false;
+    try { runtime.BackgroundJobs().Submit([](std::stop_token) {}); } catch(const std::exception&) { job_rejected=true; }
+    job_release.set_value(); runtime.Shutdown();
+    REQUIRE(was_waiting); REQUIRE(job_rejected); REQUIRE(runtime.ShutdownComplete());
+    runtime.Shutdown();
+}
+#endif
+
 int main() {
     return test::RunTestMain("adayo_p2_tests", [] {
         TestWorkbookReadAndAnalyze();
         TestWorkbookReadFromChinesePath();
         TestRuntimeViewFromFixture();
         TestJsonConfigStoreRoundTrip();
+#ifdef ADAYO_CAN_TEST_RUNTIME
+        TestRuntimeSaveOrderingAndControlledShutdown();
+#endif
         TestJsonConfigCorruptBackupAndSafeSave();
         TestJsonConfigFutureSchemaRefusesOverwrite();
         TestJsonConfigV1LanguageMigrationDoesNotOverrideAnalyzer();
@@ -692,6 +813,7 @@ int main() {
         TestModelRegistryKeepsValidModelsWhenOneIsBroken();
         TestModelRegistryRejectsDuplicateIdsAndEscapingPaths();
         TestModelRegistryExpandsCompleteSpeakers();
+        TestVoiceObservationDoesNotGrantAdmission();
         TestCorpusViewEditAndResultCycle();
         TestResultIdentitySurvivesEarlierRowStructureEdit();
         TestSyntheticBlankCannotBeEditedOrMarked();

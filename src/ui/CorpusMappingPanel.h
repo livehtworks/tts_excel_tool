@@ -31,6 +31,10 @@ public:
     void BeginShutdown();
 
 private:
+    enum GridColumn { Enabled, ExcelColumn, Header, Role, Language, Voice, Binding, ColumnCount };
+    void SelectVoice();
+    void RefreshColumnDetails(int row);
+    wxString AutoLanguageLabel(int row) const;
     void OnBrowse(wxCommandEvent& event);
     void OnLoadSheets(wxCommandEvent& event);
     void OnAnalyze(wxCommandEvent& event);
@@ -52,7 +56,6 @@ private:
     wxArrayString LanguageChoices() const;
     std::string GridFixedLanguage(int row) const;
     std::string EffectiveLanguageForRow(int row) const;
-    std::vector<std::string> ModelIdsForLanguage(const std::string& language_code) const;
     bool IsKnownModelForLanguage(const std::string& model_id, const std::string& language_code) const;
     std::vector<SelectedColumn> SelectedColumnsFromGrid() const;
     std::filesystem::path WorkbookPath() const;
@@ -70,7 +73,10 @@ private:
     std::optional<WorkbookAnalysis> analysis_;
     std::vector<TtsModelEntry> model_entries_;
     std::vector<TtsModelDiagnostic> model_invalid_;
+    std::vector<std::string> row_model_ids_;
+    std::vector<std::optional<std::string>> row_languages_;
     bool busy_{false};
+    bool rebuilding_grid_{false};
     bool closing_{false};
 
     wxTextCtrl* workbook_path_{};
@@ -87,6 +93,8 @@ private:
     wxButton* select_none_button_{};
     wxButton* apply_role_button_{};
     wxStaticText* status_{};
+    wxTextCtrl* column_details_{};
+    wxButton* select_voice_{};
 };
 
 } // namespace adayo::ui

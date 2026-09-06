@@ -19,6 +19,7 @@ TtsPanel::TtsPanel(wxWindow* parent, ApplicationRuntime& runtime)
     mapping_panel_ = new CorpusMappingPanel(notebook, runtime_, run_panel_);
     notebook->AddPage(mapping_panel_, WxUtf8("列映射"), true);
     notebook->AddPage(run_panel_, WxUtf8("运行视图"), false);
+    run_panel_->SetSessionInstalledHandler([notebook] { notebook->SetSelection(1); });
     root->Add(notebook, 1, wxEXPAND);
     SetSizer(root);
 }
@@ -29,6 +30,10 @@ void TtsPanel::BeginShutdown() {
     if (mapping_panel_) mapping_panel_->BeginShutdown();
     if (run_panel_) run_panel_->BeginShutdown();
     Disable();
+}
+
+void TtsPanel::RequestLeave(std::function<void()> action) {
+    if(!closing_) run_panel_->RequestLeave(std::move(action));
 }
 
 } // namespace adayo::ui

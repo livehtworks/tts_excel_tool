@@ -1,6 +1,7 @@
 #include "adapters/excel/LibXlsxWriterExporter.h"
 
 #include "platform/FileIo.h"
+#include "platform/UnicodePath.h"
 #include "services/CompareService.h"
 #include "core/unicode/Utf8.h"
 
@@ -217,6 +218,12 @@ std::unique_ptr<WorkbookGuard> CreateWorkbook(const std::filesystem::path& outpu
 
 void LibXlsxWriterExporter::ExportRuntimeView(const RuntimeView& view, const std::filesystem::path& output) {
 #ifdef ADAYO_HAS_LIBXLSXWRITER
+    if(!view.source.path.empty()) {
+        const auto source=PathFromUtf8(view.source.path);
+        if(std::filesystem::weakly_canonical(source)==std::filesystem::weakly_canonical(output) ||
+            (std::filesystem::exists(source) && std::filesystem::exists(output) && std::filesystem::equivalent(source,output)))
+            throw std::invalid_argument("Cannot overwrite the original workbook");
+    }
     CheckDimensions(CompareExecutionContext::Add(view.rows.size(),1),view.headers.size());
     CheckTable({view.headers}); CheckTable(view.rows);
     if(view.columns.size()!=view.headers.size() || view.row_meta.size()!=view.rows.size())

@@ -7,6 +7,7 @@
 #include <string>
 
 namespace adayo {
+class AtomicFileOperations;
 
 enum class ConfigLoadStatus {
     Loaded,
@@ -27,7 +28,7 @@ struct ConfigLoadResult {
 
 class JsonConfigStore {
 public:
-    explicit JsonConfigStore(std::filesystem::path path);
+    explicit JsonConfigStore(std::filesystem::path path, AtomicFileOperations* operations = nullptr);
 
     AppConfig Load() const;
     ConfigLoadResult LoadOrDefault() const;
@@ -37,6 +38,7 @@ public:
 
 private:
     std::filesystem::path path_;
+    AtomicFileOperations* operations_{};
 };
 
 } // namespace adayo

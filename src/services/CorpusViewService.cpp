@@ -4,9 +4,15 @@
 #include <stdexcept>
 #include <numeric>
 #include <map>
+#include <atomic>
+#include <limits>
 
 namespace adayo {
 namespace {
+std::uint64_t NextSessionId() {
+    static std::atomic<std::uint64_t> next{0};
+    return ++next;
+}
 bool IsResultText(const std::string& value) {
     return value == "pass" || value == "fail";
 }
@@ -17,6 +23,7 @@ CorpusSession CorpusViewService::CreateSession(
     std::vector<SelectedColumn> selected_columns) const {
 
     CorpusSession session;
+    session.session_id=NextSessionId();
     session.source_rows = std::move(source_rows);
     session.selected_columns = std::move(selected_columns);
     Rebuild(session);
@@ -25,6 +32,7 @@ CorpusSession CorpusViewService::CreateSession(
 
 CorpusSession CorpusViewService::CreateSessionFromWorksheet(WorksheetData worksheet, std::vector<SelectedColumn> selected_columns) const {
     CorpusSession session;
+    session.session_id=NextSessionId();
     session.source_rows=std::move(worksheet.rows); session.selected_columns=std::move(selected_columns);
     session.source_excel_row_numbers=std::move(worksheet.source_excel_row_numbers);
     session.merged_ranges=std::move(worksheet.merged_ranges); session.source=std::move(worksheet.source);
@@ -87,6 +95,24 @@ void CorpusViewService::Rebuild(CorpusSession& session) const {
 }
 
 CellEditImpact CorpusViewService::UpdateDisplayCell(
+    CorpusSession& session, std::size_t row, std::size_t column, const std::string& value) const {
+    auto candidate=session;
+    const auto impact=UpdateDisplayCellInPlace(candidate,row,column,value);
+    if(candidate.source_rows!=session.source_rows) {
+        if(session.revision==std::numeric_limits<std::uint64_t>::max()) throw std::overflow_error("Session revision exhausted");
+        candidate.revision=session.revision+1;
+    }
+    session=std::move(candidate);
+    return impact;
+}
+
+bool CorpusViewService::MarkExported(CorpusSession& session, std::uint64_t session_id, std::uint64_t revision) const {
+    if(session.session_id!=session_id || revision>session.revision) return false;
+    session.exported_revision=std::max(session.exported_revision,revision);
+    return true;
+}
+
+CellEditImpact CorpusViewService::UpdateDisplayCellInPlace(
     CorpusSession& session,
     std::size_t display_row,
     std::size_t display_column,
@@ -113,7 +139,7 @@ CellEditImpact CorpusViewService::UpdateDisplayCell(
         throw std::out_of_range("源行越界");
     }
     if (view_column.role == ColumnRole::Index || view_column.role == ColumnRole::Result) {
-        return finish();
+        throw std::invalid_argument("序号和结果列不能作为文本编辑");
     }
     if (view_column.source_index >= session.source_rows[meta.raw_row_index].size()) {
         session.source_rows[meta.raw_row_index].resize(view_column.source_index + 1);
@@ -173,6 +199,15 @@ CellEditImpact CorpusViewService::UpdateDisplayCell(
 }
 
 ResultCycleState CorpusViewService::CycleResult(CorpusSession& session, std::size_t display_row, std::size_t display_column) const {
+    auto candidate=session;
+    if(session.revision==std::numeric_limits<std::uint64_t>::max()) throw std::overflow_error("Session revision exhausted");
+    const auto result=CycleResultInPlace(candidate,display_row,display_column);
+    candidate.revision=session.revision+1;
+    session=std::move(candidate);
+    return result;
+}
+
+ResultCycleState CorpusViewService::CycleResultInPlace(CorpusSession& session, std::size_t display_row, std::size_t display_column) const {
     if (display_row >= session.view.rows.size() || display_column >= session.view.columns.size()) {
         throw std::out_of_range("结果单元格越界");
     }

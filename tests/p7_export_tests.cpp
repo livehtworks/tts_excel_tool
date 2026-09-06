@@ -161,6 +161,13 @@ void TestMetricAndLimitExports() {
     };
     reject([&]{exporter.ExportComparisonGroups(std::vector<CompareReportGroup>(4097),output);});
     auto view=MakeRuntimeView();
+    view.source.path=PathToUtf8(output);
+    reject([&]{exporter.ExportRuntimeView(view,output);});
+    const auto alias=OutputDir()/"source-hardlink.xlsx";
+    std::filesystem::create_hard_link(output,alias);
+    reject([&]{exporter.ExportRuntimeView(view,alias);});
+    REQUIRE(std::filesystem::equivalent(output,alias));
+    view=MakeRuntimeView();
     view.rows[0][0]=std::string(32768,'x');
     reject([&]{exporter.ExportRuntimeView(view,output);});
     view=MakeRuntimeView(); view.rows[0][0]=std::string("a\0b",3);

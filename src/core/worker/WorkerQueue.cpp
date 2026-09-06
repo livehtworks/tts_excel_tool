@@ -8,6 +8,7 @@ namespace adayo {
 WorkerQueue::WorkerQueue(ErrorHandler on_unhandled_task_error)
     : on_unhandled_task_error_(std::move(on_unhandled_task_error)) {
     worker_ = std::jthread([this](std::stop_token token) { Run(token); });
+    stop_source_ = worker_.get_stop_source();
 }
 WorkerQueue::~WorkerQueue() { Stop(); }
 
@@ -21,10 +22,9 @@ void WorkerQueue::Submit(Task task) {
     cv_.notify_one();
 }
 
-void WorkerQueue::Stop(StopMode mode) {
+void WorkerQueue::RequestStop(StopMode mode) {
     {
         std::lock_guard lock(mutex_);
-        if (stopped_) return;
         stopped_ = true;
         accepting_ = false;
         if (mode == StopMode::DiscardPending) {
@@ -32,8 +32,15 @@ void WorkerQueue::Stop(StopMode mode) {
             tasks_.swap(empty);
         }
     }
-    worker_.request_stop();
+    stop_source_.request_stop();
     cv_.notify_all();
+}
+
+void WorkerQueue::Stop(StopMode mode) {
+    RequestStop(mode);
+    std::lock_guard join_lock(join_mutex_);
+    if (worker_.get_id()==std::this_thread::get_id())
+        throw std::logic_error("WorkerQueue cannot join its own thread");
     if (worker_.joinable()) worker_.join();
 }
 

@@ -216,6 +216,9 @@ struct TtsModelConfig {
     std::int32_t speaker_id{0};
     std::int32_t num_threads{2};
     std::string text_normalization{"none"};
+    // Registry ownership, not synthesis parameters or persistent cache identity.
+    std::string resource_root;
+    std::string offline_transaction;
 };
 
 struct TtsRequest {

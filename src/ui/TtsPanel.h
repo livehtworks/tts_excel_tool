@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include <wx/panel.h>
 
 namespace adayo {
@@ -14,6 +16,7 @@ class TtsPanel final : public wxPanel {
 public:
     TtsPanel(wxWindow* parent, ApplicationRuntime& runtime);
     void BeginShutdown();
+    void RequestLeave(std::function<void()> action);
 
 private:
     ApplicationRuntime& runtime_;

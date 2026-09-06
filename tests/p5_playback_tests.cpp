@@ -5,12 +5,16 @@
 #include "platform/UnicodePath.h"
 #include <filesystem>
 #include <limits>
+#include <bit>
 
 #include "TestCheck.h"
 
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <exception>
+#include <future>
+#include <fstream>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -371,6 +375,7 @@ void TestCacheServiceIdentityAndRestart() {
         auto cold=tts.Prepare("voice",config,request); key=cold.timings.key; samples=cold.audio->samples;
         REQUIRE(cold.timings.source=="synth"); REQUIRE(cold.timings.synth_call_delta==1); REQUIRE(cold.timings.load_call_delta==1);
         auto warm=tts.Prepare("voice",config,request);
+        if(warm.timings.source!="memory") std::cerr<<"Unexpected cache miss: "<<tts.Cache()->Stats().warning<<'\n';
         REQUIRE(warm.timings.source=="memory"); REQUIRE(warm.timings.synth_call_delta==0); REQUIRE(warm.timings.load_call_delta==0);
         REQUIRE(warm.audio->samples==samples);
         for (auto variant : {TtsRequest{"hello!","en-US",0,1.0},TtsRequest{"hello","en-US",1,1.0},TtsRequest{"hello","en-US",0,1.1}})
@@ -532,6 +537,231 @@ void TestCacheFilesystemFailures() {
 #endif
 }
 
+void TestDiskHitSurvivesLruWriteFailure() {
+#if defined(ADAYO_HAS_JSON_CONFIG) && defined(_WIN32)
+    const auto root=NewCacheTestRoot();
+    const auto config=CacheTestConfig(root);
+    const TtsRequest request{"LRU write failure", "en-US",0,1};
+    std::string key;
+    std::vector<float> expected;
+    {
+        TtsService service; service.SetEngine(std::make_unique<FakeTtsEngine>());
+        service.InitializeCache(root/"tts-v1",{});
+        const auto result=service.Prepare("voice",config,request);
+        key=result.timings.key; expected=result.audio->samples;
+    }
+    TtsService service; service.SetEngine(std::make_unique<FakeTtsEngine>());
+    service.InitializeCache(root/"tts-v1",{});
+    const auto metadata=root/"tts-v1"/(key+".json");
+    const auto handle=CreateFileW(metadata.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    REQUIRE(handle!=INVALID_HANDLE_VALUE);
+    const auto close=[](void* value){CloseHandle(value);};
+    std::unique_ptr<void,decltype(close)> held(handle,close);
+    const auto result=service.Prepare("voice",config,request);
+    service.Cache()->FlushUsage();
+    std::cout << "CACHE01 source=" << result.timings.source << " load=" << result.timings.load_call_delta
+              << " synth=" << result.timings.synth_call_delta << " warning=" << service.Cache()->Stats().warning << '\n';
+    REQUIRE(result.timings.source=="disk");
+    REQUIRE(result.timings.load_call_delta==0); REQUIRE(result.timings.synth_call_delta==0);
+    REQUIRE(result.audio->samples==expected);
+    REQUIRE(std::filesystem::exists(root/"tts-v1"/(key+".wav")));
+    REQUIRE(!service.Cache()->Stats().warning.empty());
+    REQUIRE(service.Cache()->Stats().timestamp_write_failures==1);
+    service.Cache()->FlushUsage();
+    REQUIRE(service.Cache()->Stats().timestamp_write_failures==1);
+#endif
+}
+
+void TestSharedAssetsAndStableV1Keys() {
+    const auto root=NewCacheTestRoot(); auto config=CacheTestConfig(root);
+    TtsService tts; tts.SetEngine(std::make_unique<FakeTtsEngine>());
+    AudioCacheOptions options; options.enabled=false; tts.InitializeCache(root/"tts-v1",options);
+    const auto field=[](std::string& out,const std::string& value) { out+=std::to_string(value.size())+":"+value; };
+    for(int speaker=0;speaker<130;++speaker) {
+        config.speaker_id=speaker; const auto id="voice-"+std::to_string(speaker);
+        const auto result=tts.Prepare(id,config,{"same text","en-US",speaker,1});
+        REQUIRE(result.timings.load_call_delta==(speaker==0?1:0));
+        REQUIRE(result.timings.synth_call_delta==1);
+        REQUIRE(result.timings.resource_hash_bytes==(speaker==0?11:0));
+        REQUIRE(tts.ActiveModelId()==id);
+        std::string fingerprint;
+        for(const auto& value:{config.engine_id,std::string("fake-runtime-v1"),config.model_path,config.tokens_path,
+            config.data_dir,config.lexicon_path,config.rule_fsts,config.language_code,std::to_string(speaker),std::to_string(config.num_threads),config.text_normalization}) field(fingerprint,value);
+        field(fingerprint,Sha256("model")); field(fingerprint,Sha256("tokens"));
+        std::string expected;
+        for(const auto& value:{std::string("tts-cache-v1"),id,Sha256(fingerprint),std::string("same text"),config.language_code,
+            std::to_string(speaker),std::to_string(std::bit_cast<std::uint32_t>(1.0f))}) field(expected,value);
+        REQUIRE(result.timings.key==Sha256(expected));
+    }
+    config.speaker_id=0;
+    REQUIRE(tts.Prepare("voice-0",config,{"back","en-US",0,1}).timings.load_call_delta==0);
+    WriteBinaryFile(root/"tokens.txt","new tokens",10);
+    const auto changed=tts.Prepare("voice-0",config,{"back","en-US",0,1});
+    REQUIRE(changed.timings.resource_hash_bytes==10); REQUIRE(changed.timings.load_call_delta==1);
+}
+
+void TestUsageBatchingAndSharedReferences() {
+    const auto root=NewCacheTestRoot();
+    AudioCache cache(root/"tts-v1",{});
+    auto audio=std::make_shared<AudioBuffer>(); audio->sample_rate=16000; audio->samples.assign(160,0.1f);
+    const auto a=Sha256("shared-a"),b=Sha256("shared-b");
+    cache.Put(a,"voice",audio,0); cache.Put(b,"voice",audio,0);
+    REQUIRE(cache.Stats().memory_bytes==640); REQUIRE(cache.Stats(true).active_bytes==640);
+    const auto before=cache.Stats();
+    for(int i=0;i<31;++i) REQUIRE(cache.Get(a,"voice",0).source=="memory");
+    REQUIRE(cache.Stats().metadata_writes==before.metadata_writes);
+    REQUIRE(cache.Stats().recounts==before.recounts);
+    REQUIRE(cache.Get(a,"voice",0).source=="memory");
+#if defined(ADAYO_HAS_JSON_CONFIG) && defined(_WIN32)
+    REQUIRE(cache.Stats().metadata_writes==before.metadata_writes+1);
+    REQUIRE(cache.Get(b,"voice",0).source=="memory");
+    REQUIRE(cache.Stats().dirty_entries==1);
+    cache.FlushUsage(); REQUIRE(cache.Stats().dirty_entries==0);
+    REQUIRE(cache.Stats().metadata_writes==before.metadata_writes+2);
+#endif
+    audio.reset(); REQUIRE(cache.Stats(true).active_bytes==0);
+    auto active=cache.Get(a,"voice",0);
+    cache.BeginClear(); cache.FinishClear();
+    REQUIRE(cache.Stats().memory_bytes==0); REQUIRE(cache.Stats(true).active_bytes==640);
+    REQUIRE(active.audio->samples.size()==160);
+}
+
+void TestHitFlushBudgetAndDrain() {
+#if defined(ADAYO_HAS_JSON_CONFIG) && defined(_WIN32)
+    AudioCache cache(NewCacheTestRoot()/"tts-v1",{});
+    auto audio=std::make_shared<AudioBuffer>();
+    audio->sample_rate=16000; audio->samples.assign(160,0.1f);
+    std::vector<std::string> keys;
+    for(int i=0;i<32;++i) {
+        keys.push_back(Sha256("flush-budget-"+std::to_string(i)));
+        cache.Put(keys.back(),"voice",audio,0);
+    }
+    const auto before=cache.Stats();
+    for(const auto& key:keys) REQUIRE(cache.Get(key,"voice",0).source=="memory");
+    REQUIRE(cache.Stats().metadata_writes==before.metadata_writes+2);
+    REQUIRE(cache.Stats().dirty_entries==30);
+    REQUIRE(cache.Stats().recounts==before.recounts);
+    cache.FlushUsage();
+    REQUIRE(cache.Stats().dirty_entries==0);
+    REQUIRE(cache.Stats().metadata_writes==before.metadata_writes+32);
+    cache.FlushUsage();
+    REQUIRE(cache.Stats().metadata_writes==before.metadata_writes+32);
+#endif
+}
+
+void TestCacheScale(std::size_t count) {
+    REQUIRE(count<=20000);
+    const auto root=NewCacheTestRoot()/"tts-v1";
+    AudioCacheOptions options; options.entry_limit=(std::max)(count,std::size_t{1});
+    AudioCache cache(root,options);
+    const auto put=[&](const std::string& key) {
+        auto audio=std::make_shared<AudioBuffer>(); audio->sample_rate=16000; audio->samples.assign(16,0.2f);
+        cache.Put(key,"scale",std::move(audio),cache.Stats().epoch);
+    };
+    const auto snapshot=[&](const char* phase) {
+        const auto stats=cache.Stats(true);
+        std::uint64_t actual=0;
+        for(const auto& file:std::filesystem::directory_iterator(root)) if(file.is_regular_file()) actual+=file.file_size();
+        REQUIRE(stats.accounting_valid); REQUIRE(stats.used_bytes==actual); REQUIRE(actual<=stats.active_limit);
+        std::cout<<"SCALE count="<<count<<",phase="<<phase<<",entries="<<stats.entries<<",bytes="<<actual
+            <<",recounts="<<stats.recounts<<",metadata_writes="<<stats.metadata_writes<<",eviction_scans="<<stats.eviction_scans
+            <<",pin_checks="<<stats.pin_scans<<",memory_bytes="<<stats.memory_bytes<<",active_bytes="<<stats.active_bytes<<'\n';
+    };
+    for(std::size_t i=0;i<count;++i) put(Sha256("scale-"+std::to_string(i)));
+    snapshot("seed"); REQUIRE(cache.Stats().entries==count);
+    const auto before=cache.Stats();
+    for(std::size_t i=0;i<50;++i) {
+        const auto hit=cache.Get(Sha256("scale-"+std::to_string(count?i%count:0)),"scale",0);
+        REQUIRE(static_cast<bool>(hit.audio)==(count>0));
+    }
+    REQUIRE(cache.Stats().recounts==before.recounts); snapshot("hits");
+    for(std::size_t i=0;i<50;++i) put(Sha256("new-"+std::to_string(i)));
+    snapshot("put-evict");
+    options.entry_limit=(std::max)(std::size_t{1},count/2);
+    cache.Configure(options); REQUIRE(cache.Stats().entries<=options.entry_limit); snapshot("shrink");
+    cache.FlushUsage(); REQUIRE(cache.Stats().dirty_entries==0); snapshot("flush");
+    cache.BeginClear(); const auto cleared=cache.FinishClear();
+    REQUIRE(cleared.failed_entries==0); REQUIRE(cleared.entries==0); snapshot("clear");
+}
+
+void TestPartialClearAccounting() {
+#if defined(ADAYO_HAS_JSON_CONFIG) && defined(_WIN32)
+    const auto root=NewCacheTestRoot()/"tts-v1";
+    AudioCacheOptions options; options.disk_limit_bytes=32768;
+    AudioCache cache(root,options);
+    auto audio=std::make_shared<AudioBuffer>(); audio->sample_rate=16000; audio->samples.assign(160,0.2f);
+    std::vector<HANDLE> locks;
+    for(int i=0;i<10;++i) {
+        const auto key=Sha256("partial-"+std::to_string(i));
+        cache.Put(key,"voice",audio,0);
+        if(i%2==0) {
+            const auto handle=CreateFileW((root/(key+".wav")).c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+            REQUIRE(handle!=INVALID_HANDLE_VALUE); locks.push_back(handle);
+        }
+    }
+    REQUIRE(cache.Stats().entries==10);
+    WriteBinaryFile(root/"foreign.tmp","KEEP",4);
+    const auto owner_hash=FileSha256(root/"owner.json");
+    cache.BeginClear(); const auto partial=cache.FinishClear();
+    for(const auto handle:locks) CloseHandle(handle);
+    REQUIRE(partial.failed_entries==5); REQUIRE(partial.entries==5);
+    REQUIRE(!partial.warning.empty()); REQUIRE(partial.accounting_valid);
+    std::uint64_t actual=0;
+    for(const auto& file:std::filesystem::directory_iterator(root)) if(file.is_regular_file()) actual+=file.file_size();
+    REQUIRE(partial.used_bytes==actual); REQUIRE(actual<=partial.active_limit);
+    REQUIRE(cache.Stats(true).active_bytes==640); REQUIRE(audio->samples.front()==0.2f);
+    cache.BeginClear(); const auto complete=cache.FinishClear();
+    REQUIRE(complete.failed_entries==0); REQUIRE(complete.entries==0);
+    REQUIRE(FileSha256(root/"foreign.tmp")==Sha256("KEEP")); REQUIRE(FileSha256(root/"owner.json")==owner_hash);
+    std::cout<<"PASS: half of 10 entries fail deletion, exact bytes/quota and live PCM lease preserved\n";
+#endif
+}
+
+void SeedAbnormalCacheExit() {
+#if defined(ADAYO_HAS_JSON_CONFIG) && defined(_WIN32)
+    const auto root=std::filesystem::current_path();
+    REQUIRE(FileSha256(root/"disposable-fixture")==Sha256("R2 crash test"));
+    AudioCache cache(root/"tts-v1",{});
+    auto audio=std::make_shared<AudioBuffer>(); audio->sample_rate=16000; audio->samples.assign(160,0.2f);
+    const auto key=Sha256("abnormal-cache");
+    cache.Put(key,"voice",audio,0);
+    const auto hash=FileSha256(root/"tts-v1"/(key+".json"));
+    WriteBinaryFile(root/"metadata-before-hit",hash.data(),hash.size());
+    REQUIRE(cache.Get(key,"voice",0).source=="memory"); REQUIRE(cache.Stats().dirty_entries==1);
+    // Intentionally bypass destructors in this isolated child, as a process crash would.
+    std::_Exit(23);
+#endif
+}
+
+void TestCacheAfterAbnormalExit() {
+#if defined(ADAYO_HAS_JSON_CONFIG) && defined(_WIN32)
+    const auto root=NewCacheTestRoot();
+    WriteBinaryFile(root/"disposable-fixture","R2 crash test",13);
+    std::wstring executable(32768,L'\0');
+    const auto length=GetModuleFileNameW(nullptr,executable.data(),static_cast<DWORD>(executable.size()));
+    REQUIRE(length>0 && length<executable.size()); executable.resize(length);
+    auto command=L"\""+executable+L"\" --cache-abnormal-seed";
+    STARTUPINFOW startup{}; startup.cb=sizeof(startup); PROCESS_INFORMATION process{};
+    REQUIRE(CreateProcessW(executable.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,root.c_str(),&startup,&process));
+    const auto waited=WaitForSingleObject(process.hProcess,30000);
+    DWORD code=0; const auto read_code=GetExitCodeProcess(process.hProcess,&code);
+    CloseHandle(process.hThread); CloseHandle(process.hProcess);
+    REQUIRE(waited==WAIT_OBJECT_0); REQUIRE(read_code); REQUIRE(code==23);
+    const auto key=Sha256("abnormal-cache");
+    const auto directory=root/"tts-v1";
+    std::ifstream saved(root/"metadata-before-hit"); std::string before; saved>>before;
+    REQUIRE(FileSha256(directory/(key+".json"))==before);
+    const auto owner=FileSha256(directory/"owner.json");
+    AudioCache cache(directory,{}); REQUIRE(cache.Stats().disk_enabled);
+    const auto hit=cache.Get(key,"voice",0);
+    REQUIRE(hit.source=="disk"); REQUIRE(hit.audio && hit.audio->samples.size()==160 && hit.audio->samples.front()==0.2f);
+    cache.FlushUsage(); REQUIRE(cache.Stats().dirty_entries==0);
+    REQUIRE(FileSha256(directory/(key+".json"))!=before);
+    REQUIRE(FileSha256(directory/"owner.json")==owner);
+    std::cout<<"PASS: child exit=23 without drain; validated PCM and ownership survive, normal drain persists usage\n";
+#endif
+}
+
 class HandoffPlayer final : public IAudioPlayer {
 public:
     void Play(const AudioBuffer&) override { throw std::logic_error("Context required"); }
@@ -626,6 +856,48 @@ void TestWorkerQueueStopIsIdempotentAndConstructionIsStable() {
     }
 }
 
+void TestNonblockingStopAndPlaybackSnapshot() {
+    WorkerQueue queue;
+    std::promise<void> entered,release;
+    auto released=release.get_future().share();
+    std::atomic<bool> returned{},pending_ran{};
+    queue.Submit([&](std::stop_token) { entered.set_value(); released.wait(); returned=true; });
+    entered.get_future().get();
+    queue.Submit([&](std::stop_token) { pending_ran=true; });
+    queue.RequestStop(StopMode::DiscardPending);
+    const bool stopped_before_release=!returned;
+    bool rejected=false;
+    try { queue.Submit([](std::stop_token) {}); } catch(const std::exception&) { rejected=true; }
+    release.set_value(); queue.Stop();
+    REQUIRE(stopped_before_release); REQUIRE(rejected); REQUIRE(returned); REQUIRE(!pending_ran);
+
+    auto* engine=new FakeTtsEngine(); engine->block_synthesis=true;
+    TtsService tts; tts.SetEngine(std::unique_ptr<ITtsEngine>(engine));
+    FakePlayer player; PlaybackService playback(tts,player);
+    playback.Play(MakePlaybackRequest({{{"first","en-US",0,1.0},41,7}}));
+    const bool entered_synth=engine->WaitForSynthStart(std::chrono::seconds(2));
+    const auto first=playback.Snapshot();
+    playback.Stop();
+    const auto stopping=playback.Snapshot();
+    playback.Play(MakePlaybackRequest({{{"second","en-US",0,1.0},3,9}}));
+    const auto second=playback.Snapshot();
+    playback.RequestShutdown();
+    const auto shutdown=playback.Snapshot();
+    playback.Play(MakePlaybackRequest({{{"rejected","en-US",0,1.0},99,99}}));
+    const auto rejected_play=playback.Snapshot();
+    engine->ReleaseSynthesis(); playback.Shutdown();
+    REQUIRE(entered_synth);
+    REQUIRE(first.state==PlaybackState::Generating && first.row==41 && first.column==7 && first.request_id!=0);
+    REQUIRE(stopping.state==PlaybackState::Stopping && stopping.request_id==first.request_id);
+    REQUIRE(second.state==PlaybackState::Generating && second.row==3 && second.column==9);
+    REQUIRE(second.request_id>first.request_id);
+    REQUIRE(shutdown.state==PlaybackState::Stopping);
+    REQUIRE(rejected_play.request_id==shutdown.request_id && rejected_play.row==3);
+    REQUIRE(playback.Snapshot().state==PlaybackState::Idle);
+    REQUIRE(playback.Snapshot().request_id==0);
+    REQUIRE(player.play_count==0);
+}
+
 void TestWorkerQueueUnhandledTaskErrorDoesNotTerminateWorker() {
     std::mutex mutex;
     std::condition_variable cv;
@@ -658,7 +930,14 @@ void TestWorkerQueueUnhandledTaskErrorDoesNotTerminateWorker() {
 }
 } // namespace
 
-int main() {
+int main(int argc,char** argv) {
+    if(argc==2 && std::string(argv[1])=="--cache-abnormal-seed") {
+        SeedAbnormalCacheExit(); return 1;
+    }
+    if(argc==3 && std::string(argv[1])=="--r2-cache-scale")
+        return test::RunTestMain("R2_CACHE_SCALE",[&] { TestCacheScale(std::stoull(argv[2])); });
+    if(argc==2 && std::string(argv[1])=="--r2-cache01")
+        return test::RunTestMain("R2_CACHE01",TestDiskHitSurvivesLruWriteFailure);
     return test::RunTestMain("adayo_p5_playback_tests", [] {
         TestSequenceSkipsEmptyAndReturnsIdle();
         TestPauseResumeAndStopDoNotLeaveStaleState();
@@ -676,7 +955,14 @@ int main() {
         TestCacheEpochAndCancelableConcurrentMiss();
         TestCacheCapacityAndLru();
         TestCacheFilesystemFailures();
+        TestDiskHitSurvivesLruWriteFailure();
+        TestSharedAssetsAndStableV1Keys();
+        TestUsageBatchingAndSharedReferences();
+        TestHitFlushBudgetAndDrain();
+        TestPartialClearAccounting();
+        TestCacheAfterAbnormalExit();
         TestWorkerQueueDiscardPending();
+        TestNonblockingStopAndPlaybackSnapshot();
         TestWorkerQueueStopIsIdempotentAndConstructionIsStable();
         TestWorkerQueueUnhandledTaskErrorDoesNotTerminateWorker();
     });

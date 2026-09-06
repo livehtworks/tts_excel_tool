@@ -7,9 +7,14 @@ PlaybackService::PlaybackService(TtsService& tts, IAudioPlayer& player, ErrorHan
     : tts_(tts), player_(player), on_error_(std::move(on_error)), on_timing_(std::move(on_timing)) {}
 PlaybackService::~PlaybackService() { Shutdown(); }
 
-void PlaybackService::Shutdown() {
+void PlaybackService::RequestShutdown() {
     { std::lock_guard lock(mutex_); shutdown_ = true; }
     Stop();
+    worker_.RequestStop(StopMode::DiscardPending);
+}
+
+void PlaybackService::Shutdown() {
+    RequestShutdown();
     worker_.Stop(StopMode::DiscardPending);
     { std::lock_guard lock(mutex_); active_request_.reset(); state_ = PlaybackState::Idle; }
     cv_.notify_all();
@@ -29,6 +34,8 @@ void PlaybackService::Play(PlaybackRequest request) {
     auto context = std::make_shared<AudioPlaybackContext>();
     context->request_id = ++generation_;
     active_request_ = context;
+    current_row_ = request.items.empty() ? 0 : request.items.front().row_index;
+    current_column_ = request.items.empty() ? 0 : request.items.front().column_index;
     state_ = PlaybackState::Generating;
     last_error_.clear();
     for (auto& item : request.items) item.request.speed = request.speed;
@@ -71,6 +78,10 @@ void PlaybackService::Stop() {
     cv_.notify_all();
 }
 PlaybackState PlaybackService::State() const { std::lock_guard lock(mutex_); return state_; }
+PlaybackSnapshot PlaybackService::Snapshot() const {
+    std::lock_guard lock(mutex_);
+    return {state_,active_request_ ? active_request_->request_id : 0,current_row_,current_column_,last_error_};
+}
 std::string PlaybackService::LastError() const { std::lock_guard lock(mutex_); return last_error_; }
 std::size_t PlaybackService::CurrentRow() const { std::lock_guard lock(mutex_); return current_row_; }
 std::size_t PlaybackService::CurrentColumn() const { std::lock_guard lock(mutex_); return current_column_; }
@@ -94,6 +105,7 @@ bool PlaybackService::SetRequestState(const std::shared_ptr<AudioPlaybackContext
     return true;
 }
 void PlaybackService::Finish(const std::shared_ptr<AudioPlaybackContext>& context, std::string error) {
+    if(tts_.Cache()) tts_.Cache()->FlushUsage();
     bool report = false;
     {
         std::lock_guard lock(mutex_);

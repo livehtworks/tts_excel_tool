@@ -26,19 +26,36 @@ void TtsService::SetEngine(std::unique_ptr<ITtsEngine> engine) {
     if (!engine) throw std::invalid_argument("TTS engine is required");
     std::scoped_lock lock(mutex_);
     if (engine_) engine_->Unload();
-    engine_=std::move(engine); active_model_id_.clear(); active_identity_.clear(); fingerprints_.clear();
+    engine_=std::move(engine); active_model_id_.clear(); active_identity_.clear(); file_digests_.clear();
 }
 void TtsService::InitializeCache(const std::filesystem::path& root, AudioCacheOptions options) {
     std::lock_guard lock(mutex_);
     if (cache_) throw std::logic_error("Cache already initialized");
     cache_=std::make_unique<AudioCache>(root,options);
 }
-std::string TtsService::ModelIdentity(const TtsModelConfig& config, bool require_assets) {
+void TtsService::SetNativeReturnHandler(std::function<void(std::string_view)> handler) {
+    std::lock_guard lock(mutex_); native_return_handler_=std::move(handler);
+}
+AudioBuffer TtsService::SynthesizeLocked(const TtsRequest& request) {
+    AudioBuffer audio;
+    try { audio=engine_->Synthesize(request); }
+    catch(...) { if(native_return_handler_) native_return_handler_("synthesize_failed"); throw; }
+    if(native_return_handler_) native_return_handler_("synthesize");
+    return audio;
+}
+TtsService::ModelIdentities TtsService::ModelIdentity(const TtsModelConfig& config, bool require_assets) {
     if (!engine_ || engine_->Id()!=config.engine_id) throw std::runtime_error("ENGINE_MISMATCH");
+    if(!config.resource_root.empty() && config.offline_transaction.empty() &&
+        std::filesystem::exists(PathFromUtf8(config.resource_root)/".preparation-incomplete.json"))
+        throw std::runtime_error("MODEL_UPDATE_INCOMPLETE: offline voice recovery required");
     std::string configuration;
     for (const auto& value : {config.engine_id,engine_->RuntimeIdentity(),config.model_path,config.tokens_path,
         config.data_dir,config.lexicon_path,config.rule_fsts,config.language_code,std::to_string(config.speaker_id),std::to_string(config.num_threads),config.text_normalization})
         Field(configuration,value);
+    std::string load_configuration;
+    for (const auto& value : {config.engine_id,engine_->RuntimeIdentity(),config.model_path,config.tokens_path,
+        config.data_dir,config.lexicon_path,config.rule_fsts,config.language_code,std::to_string(config.num_threads),config.text_normalization})
+        Field(load_configuration,value);
     if (require_assets && (config.model_path.empty() || config.tokens_path.empty() || config.language_code.empty() || config.speaker_id<0 || config.num_threads<1))
         throw std::runtime_error("MODEL_INVALID: incomplete model context");
     std::vector<std::filesystem::path> paths;
@@ -61,6 +78,7 @@ std::string TtsService::ModelIdentity(const TtsModelConfig& config, bool require
     if (!config.data_dir.empty()) {
         auto root=PathFromUtf8(config.data_dir); RequireOrdinaryPath(root);
         if (!std::filesystem::is_directory(root)) throw std::runtime_error("MODEL_MISSING: data_dir");
+        ++resource_enumerations_;
         for (const auto& item:std::filesystem::recursive_directory_iterator(root)) {
 #ifdef _WIN32
             const auto attributes=GetFileAttributesW(item.path().c_str());
@@ -72,8 +90,10 @@ std::string TtsService::ModelIdentity(const TtsModelConfig& config, bool require
         }
     }
     std::sort(paths.begin(),paths.end());
-    std::string snapshot=configuration;
+    std::string content=configuration, load_content=load_configuration;
     for (const auto& path:paths) {
+        std::string snapshot;
+        ++resource_attributes_;
         Field(snapshot,PathToUtf8(path));
 #ifdef _WIN32
         auto handle=CreateFileW(path.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
@@ -89,32 +109,38 @@ std::string TtsService::ModelIdentity(const TtsModelConfig& config, bool require
         Field(snapshot,std::to_string(std::filesystem::file_size(path)));
         Field(snapshot,std::to_string(std::filesystem::last_write_time(path).time_since_epoch().count()));
 #endif
+        if (!file_digests_.contains(path) && file_digests_.size()>=32768) file_digests_.erase(file_digests_.begin());
+        auto& cached=file_digests_[path];
+        if (cached.snapshot!=snapshot || cached.digest.empty()) {
+            resource_hash_bytes_+=std::filesystem::file_size(path);
+            const auto digest=FileSha256(path);
+            cached={snapshot,digest};
+        }
+        // Preserve the v1 byte stream: configuration followed by ordered file hashes.
+        Field(content,cached.digest);
+        Field(load_content,cached.digest);
     }
-    if(!fingerprints_.contains(configuration) && fingerprints_.size()>=64) fingerprints_.erase(fingerprints_.begin());
-    auto& cached=fingerprints_[configuration];
-    if (cached.snapshot==snapshot && !cached.digest.empty()) return cached.digest;
-    std::string content=configuration;
-    for (const auto& path:paths) Field(content,FileSha256(path));
-    cached={snapshot,Sha256(content)};
-    return cached.digest;
+    return {Sha256(content),Sha256(load_content)};
 }
 void TtsService::EnsureLocked(std::string_view model_id, const TtsModelConfig& config, const std::string& identity) {
     if (!engine_ || config.engine_id!=engine_->Id()) throw std::runtime_error("ENGINE_MISMATCH");
-    if (engine_->IsLoaded() && active_model_id_==model_id && active_identity_==identity) return;
+    if (engine_->IsLoaded() && active_identity_==identity) { active_model_id_=model_id; return; }
     active_model_id_.clear(); active_identity_.clear();
     if (engine_->IsLoaded()) engine_->Unload();
-    engine_->Load(config);
+    try { engine_->Load(config); }
+    catch(...) { if(native_return_handler_) native_return_handler_("load_failed"); throw; }
+    if(native_return_handler_) native_return_handler_("load");
     active_model_id_=model_id; active_identity_=identity;
 }
 void TtsService::EnsureModelLoaded(std::string_view model_id, const TtsModelConfig& config) {
     std::lock_guard lock(mutex_);
-    EnsureLocked(model_id,config,ModelIdentity(config,cache_!=nullptr));
+    EnsureLocked(model_id,config,ModelIdentity(config,cache_!=nullptr).load);
 }
 AudioBuffer TtsService::Synthesize(const TtsRequest& request) {
     CheckRequest(request);
     std::lock_guard lock(mutex_);
     if (!engine_ || !engine_->IsLoaded()) throw std::runtime_error("TTS model not loaded");
-    auto audio=engine_->Synthesize(request); AudioCache::Validate(audio); return audio;
+    auto audio=SynthesizeLocked(request); AudioCache::Validate(audio); return audio;
 }
 PreparedAudio TtsService::Prepare(std::string_view model_id, const TtsModelConfig& config, const TtsRequest& request, std::stop_token token) {
     CheckRequest(request);
@@ -126,10 +152,12 @@ PreparedAudio TtsService::Prepare(std::string_view model_id, const TtsModelConfi
     std::unique_lock<std::timed_mutex> lock(mutex_,std::defer_lock);
     while (!lock.try_lock_for(std::chrono::milliseconds(10))) if (token.stop_requested()) throw std::runtime_error("TTS_CANCELED");
     if (token.stop_requested()) throw std::runtime_error("TTS_CANCELED");
+    const auto before_enumerations=resource_enumerations_, before_attributes=resource_attributes_, before_hash_bytes=resource_hash_bytes_;
     if (cache_ && (request.language_code!=config.language_code || request.speaker_id<0))
         throw std::runtime_error("MODEL_INVALID: language or speaker mismatch");
     auto checkpoint=Clock::now();
-    const auto fingerprint=ModelIdentity(config,cache_!=nullptr);
+    const auto identities=ModelIdentity(config,cache_!=nullptr);
+    const auto& fingerprint=identities.audio;
     result.timings.model_validation_ms=Ms(checkpoint);
     checkpoint=Clock::now();
     auto effective=request; effective.speed=static_cast<float>(std::clamp(request.speed,0.5,2.0));
@@ -148,10 +176,10 @@ PreparedAudio TtsService::Prepare(std::string_view model_id, const TtsModelConfi
     } else {
         if (token.stop_requested()) throw std::runtime_error("TTS_CANCELED");
         checkpoint=Clock::now();
-        const bool needsLoad=!engine_->IsLoaded() || active_model_id_!=model_id || active_identity_!=fingerprint;
-        EnsureLocked(model_id,config,fingerprint);
+        const bool needsLoad=!engine_->IsLoaded() || active_identity_!=identities.load;
+        EnsureLocked(model_id,config,identities.load);
         result.timings.load_call_delta=needsLoad ? 1 : 0; result.timings.model_load_ms=Ms(checkpoint);
-        checkpoint=Clock::now(); result.audio=std::make_shared<AudioBuffer>(engine_->Synthesize(effective));
+        checkpoint=Clock::now(); result.audio=std::make_shared<AudioBuffer>(SynthesizeLocked(effective));
         result.timings.synth_ms=Ms(checkpoint); result.timings.synth_call_delta=1; result.timings.source="synth";
         AudioCache::Validate(*result.audio);
         checkpoint=Clock::now();
@@ -160,6 +188,9 @@ PreparedAudio TtsService::Prepare(std::string_view model_id, const TtsModelConfi
     }
     if (token.stop_requested()) throw std::runtime_error("TTS_CANCELED");
     result.timings.audio_prepare_ms=Ms(start);
+    result.timings.resource_enumerations=resource_enumerations_-before_enumerations;
+    result.timings.resource_attributes=resource_attributes_-before_attributes;
+    result.timings.resource_hash_bytes=resource_hash_bytes_-before_hash_bytes;
     return result;
 }
 void TtsService::Unload() noexcept {

@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <utility>
+#include <cmath>
 
 #include <wx/button.h>
 #include <wx/checkbox.h>
@@ -25,6 +26,9 @@
 #include <wx/spinctrl.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
+#include <wx/collpane.h>
+#include <wx/richtext/richtextctrl.h>
+#include <wx/msgdlg.h>
 
 namespace adayo::ui {
 namespace {
@@ -41,6 +45,10 @@ ComparePanel::ComparePanel(wxWindow* parent, ApplicationRuntime& runtime)
       report_groups_(std::make_shared<const std::vector<CompareReportGroup>>()) {
     auto* root = new wxBoxSizer(wxVERTICAL);
 
+    auto* group_bar = new wxBoxSizer(wxHORIZONTAL);
+    group_list_ = new wxListBox(this,wxID_ANY,wxDefaultPosition,FromDIP(wxSize(170,110)),0,nullptr,wxLB_SINGLE|wxLB_HSCROLL);
+    group_list_->Bind(wxEVT_LISTBOX,[this](wxCommandEvent&) { SelectInputGroup(); });
+    group_bar->Add(group_list_,0,wxEXPAND|wxRIGHT,8);
     auto* input = new wxBoxSizer(wxVERTICAL);
     auto add_text_row = [&](const char* label, wxTextCtrl*& target, wxButton** browse_button, auto handler) {
         auto* row = new wxBoxSizer(wxHORIZONTAL);
@@ -59,38 +67,57 @@ ComparePanel::ComparePanel(wxWindow* parent, ApplicationRuntime& runtime)
     add_text_row("语言组:", language_label_, nullptr, &ComparePanel::OnOpenReference);
     add_text_row("正式文本:", reference_path_, &reference_browse_, &ComparePanel::OnOpenReference);
     add_text_row("机器文本:", actual_path_, &actual_browse_, &ComparePanel::OnOpenActual);
-    add_text_row("字面分隔:", delimiter_, nullptr, &ComparePanel::OnOpenReference);
-    delimiter_->SetToolTip(WxUtf8("UTF-8 字面字符串，不是正则表达式，不展开反斜线"));
-    root->Add(input, 0, wxEXPAND | wxALL, 10);
-
-    auto* group_bar = new wxBoxSizer(wxHORIZONTAL);
-    group_list_ = new wxListBox(this, wxID_ANY);
+    group_bar->Add(input,1,wxEXPAND);
+    root->Add(group_bar,0,wxEXPAND|wxALL,8);
     add_group_ = new wxButton(this, wxID_ANY, WxUtf8("加入组"));
     remove_group_ = new wxButton(this, wxID_ANY, WxUtf8("移除组"));
+    new_group_=new wxButton(this,wxID_ANY,WxUtf8("新建组"));
+    apply_group_=new wxButton(this,wxID_ANY,WxUtf8("应用修改"));
+    cancel_group_=new wxButton(this,wxID_ANY,WxUtf8("取消修改"));
+    new_group_->Bind(wxEVT_BUTTON,[this](wxCommandEvent&) { if(!busy_ && ResolveGroupDraft()) LoadGroupDraft({}); });
+    apply_group_->Bind(wxEVT_BUTTON,[this](wxCommandEvent&) { if(!busy_) ApplyGroupDraft(); });
+    cancel_group_->Bind(wxEVT_BUTTON,[this](wxCommandEvent&) { if(!busy_) LoadGroupDraft(editing_group_id_); });
     add_group_->Bind(wxEVT_BUTTON, &ComparePanel::OnAddGroup, this);
     remove_group_->Bind(wxEVT_BUTTON, &ComparePanel::OnRemoveGroup, this);
-    auto* group_buttons = new wxBoxSizer(wxVERTICAL);
-    group_buttons->Add(add_group_, 0, wxEXPAND | wxBOTTOM, 6);
-    group_buttons->Add(remove_group_, 0, wxEXPAND);
-    group_bar->Add(group_list_, 1, wxRIGHT, 8);
-    group_bar->Add(group_buttons, 0);
-    root->Add(group_bar, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+    auto* group_buttons = new wxBoxSizer(wxHORIZONTAL);
+    for(auto* button:{new_group_,add_group_,apply_group_,cancel_group_,remove_group_}) group_buttons->Add(button,0,wxRIGHT,6);
+    root->Add(group_buttons,0,wxEXPAND|wxLEFT|wxRIGHT|wxBOTTOM,8);
 
     auto* options_bar=new wxWrapSizer(wxHORIZONTAL);
-    auto add_choice=[&](const char* title,wxChoice*& control,std::initializer_list<const char*> labels) {
-        options_bar->Add(new wxStaticText(this,wxID_ANY,WxUtf8(title)),0,wxALIGN_CENTER_VERTICAL|wxALL,4);
-        control=new wxChoice(this,wxID_ANY);
+    auto add_choice=[&](wxWindow* parent,wxSizer* sizer,const char* title,wxChoice*& control,std::initializer_list<const char*> labels) {
+        sizer->Add(new wxStaticText(parent,wxID_ANY,WxUtf8(title)),0,wxALIGN_CENTER_VERTICAL|wxALL,4);
+        control=new wxChoice(parent,wxID_ANY);
         for(auto label:labels) control->Append(WxUtf8(label));
-        options_bar->Add(control,0,wxALL,4);
+        sizer->Add(control,0,wxALL,4);
         option_controls_.push_back(control);
         control->Bind(wxEVT_CHOICE,&ComparePanel::OnInputChanged,this);
     };
-    add_choice("预设",profile_,{"现有自动对齐","逐行严格核对","字错误率 CER","词错误率 WER"});
-    add_choice("对应方式",pairing_,{"顺序自动对齐","逐行对应"});
-    add_choice("Unicode",normalization_,{"None","NFC","NFKC"});
+    add_choice(this,options_bar,"预设",profile_,{"现有自动对齐","逐行严格核对","字错误率 CER","词错误率 WER"});
+    add_choice(this,options_bar,"对应方式",pairing_,{"顺序自动对齐","逐行对应"});
+    auto add_number=[&](wxWindow* parent,wxSizer* sizer,const char* title,wxSpinCtrlDouble*& control,double maximum) {
+        sizer->Add(new wxStaticText(parent,wxID_ANY,WxUtf8(title)),0,wxALIGN_CENTER_VERTICAL|wxALL,4);
+        control=new wxSpinCtrlDouble(parent,wxID_ANY,wxEmptyString,wxDefaultPosition,FromDIP(wxSize(90,-1)));
+        control->SetRange(0,maximum); control->SetDigits(2);
+        control->Bind(wxEVT_SPINCTRLDOUBLE,&ComparePanel::OnInputChanged,this);
+        control->Bind(wxEVT_TEXT,&ComparePanel::OnInputChanged,this);
+        control->Bind(wxEVT_KILL_FOCUS,[this](wxFocusEvent& event) { CommitOptions(); event.Skip(); });
+        option_controls_.push_back(control); sizer->Add(control,0,wxALL,4);
+    };
+    add_number(this,options_bar,"相似度通过 (%)",pass_threshold_,100);
+    options_bar->Add(new wxStaticText(this,wxID_ANY,WxUtf8("最大错误率 (%)")),0,wxALIGN_CENTER_VERTICAL|wxALL,4);
+    max_error_=new wxTextCtrl(this,wxID_ANY,"0",wxDefaultPosition,FromDIP(wxSize(85,-1)));
+    max_error_->Bind(wxEVT_TEXT,&ComparePanel::OnInputChanged,this);
+    max_error_->Bind(wxEVT_KILL_FOCUS,[this](wxFocusEvent& event) { CommitOptions(); event.Skip(); });
+    options_bar->Add(max_error_,0,wxALL,4); option_controls_.push_back(max_error_);
+    root->Add(options_bar,0,wxEXPAND|wxLEFT|wxRIGHT,8);
+    advanced_=new wxCollapsiblePane(this,wxID_ANY,WxUtf8("高级参数"),wxDefaultPosition,wxDefaultSize,wxCP_DEFAULT_STYLE|wxCP_NO_TLW_RESIZE);
+    auto* advanced_parent=advanced_->GetPane();
+    auto* advanced_sizer=new wxBoxSizer(wxVERTICAL);
+    auto* normalizers=new wxWrapSizer(wxHORIZONTAL);
+    add_choice(advanced_parent,normalizers,"Unicode",normalization_,{"None","NFC","NFKC"});
     auto add_check=[&](const char* title,wxCheckBox*& control) {
-        control=new wxCheckBox(this,wxID_ANY,WxUtf8(title));
-        options_bar->Add(control,0,wxALIGN_CENTER_VERTICAL|wxALL,4);
+        control=new wxCheckBox(advanced_parent,wxID_ANY,WxUtf8(title));
+        normalizers->Add(control,0,wxALIGN_CENTER_VERTICAL|wxALL,4);
         option_controls_.push_back(control);
         control->Bind(wxEVT_CHECKBOX,&ComparePanel::OnInputChanged,this);
     };
@@ -98,29 +125,22 @@ ComparePanel::ComparePanel(wxWindow* parent, ApplicationRuntime& runtime)
     add_check("忽略标点",ignore_punctuation_);
     add_check("合并空白",collapse_whitespace_);
     add_check("去首尾空白",trim_);
-    root->Add(options_bar,0,wxEXPAND|wxLEFT|wxRIGHT,10);
+    advanced_sizer->Add(normalizers,0,wxEXPAND);
     auto* thresholds=new wxWrapSizer(wxHORIZONTAL);
-    auto add_number=[&](const char* title,wxSpinCtrlDouble*& control,double maximum) {
-        thresholds->Add(new wxStaticText(this,wxID_ANY,WxUtf8(title)),0,wxALIGN_CENTER_VERTICAL|wxALL,4);
-        control=new wxSpinCtrlDouble(this,wxID_ANY,wxEmptyString,wxDefaultPosition,wxSize(90,-1));
-        control->SetRange(0,maximum);
-        control->SetDigits(2);
-        control->Bind(wxEVT_SPINCTRLDOUBLE,&ComparePanel::OnInputChanged,this);
-        control->Bind(wxEVT_TEXT,&ComparePanel::OnInputChanged,this);
-        option_controls_.push_back(control);
-        thresholds->Add(control,0,wxALL,4);
-    };
-    add_number("候选阈值",align_threshold_,100);
-    add_number("锚点阈值",anchor_threshold_,100);
-    add_number("唯一性差值",anchor_margin_,100);
-    add_number("缺口惩罚",gap_penalty_,1000000);
-    add_number("相似度通过(%)",pass_threshold_,100);
-    thresholds->Add(new wxStaticText(this,wxID_ANY,WxUtf8("最大错误率(%)")),0,wxALIGN_CENTER_VERTICAL|wxALL,4);
-    max_error_=new wxTextCtrl(this,wxID_ANY,"0",wxDefaultPosition,wxSize(90,-1));
-    max_error_->Bind(wxEVT_TEXT,&ComparePanel::OnInputChanged,this);
-    thresholds->Add(max_error_,0,wxALL,4);
-    option_controls_.push_back(max_error_);
-    root->Add(thresholds,0,wxEXPAND|wxLEFT|wxRIGHT,10);
+    add_number(advanced_parent,thresholds,"候选阈值",align_threshold_,100);
+    add_number(advanced_parent,thresholds,"锚点阈值",anchor_threshold_,100);
+    add_number(advanced_parent,thresholds,"唯一性差值",anchor_margin_,100);
+    add_number(advanced_parent,thresholds,"缺口惩罚",gap_penalty_,1000000);
+    advanced_sizer->Add(thresholds,0,wxEXPAND);
+    auto* delimiter_row=new wxBoxSizer(wxHORIZONTAL);
+    delimiter_row->Add(new wxStaticText(advanced_parent,wxID_ANY,WxUtf8("字面分隔")),0,wxALIGN_CENTER_VERTICAL|wxRIGHT,6);
+    delimiter_=new wxTextCtrl(advanced_parent,wxID_ANY);
+    delimiter_->Bind(wxEVT_TEXT,&ComparePanel::OnInputChanged,this);
+    delimiter_->Bind(wxEVT_KILL_FOCUS,[this](wxFocusEvent& event) { CommitOptions(); event.Skip(); });
+    delimiter_row->Add(delimiter_,1); advanced_sizer->Add(delimiter_row,0,wxEXPAND|wxALL,4);
+    advanced_parent->SetSizer(advanced_sizer);
+    advanced_->Bind(wxEVT_COLLAPSIBLEPANE_CHANGED,[this](wxCollapsiblePaneEvent&) { LayoutOptions(); });
+    root->Add(advanced_,0,wxEXPAND|wxLEFT|wxRIGHT,8);
     option_summary_=new wxStaticText(this,wxID_ANY,wxEmptyString);
     root->Add(option_summary_,0,wxEXPAND|wxALL,10);
     auto* commands=new wxBoxSizer(wxHORIZONTAL);
@@ -139,17 +159,53 @@ ComparePanel::ComparePanel(wxWindow* parent, ApplicationRuntime& runtime)
     commands->Add(status_,1,wxALIGN_CENTER_VERTICAL);
     root->Add(commands,0,wxEXPAND|wxALL,10);
     ApplyOptions(runtime_.ConfigSnapshot().compare);
+    observed_options_=CurrentOptions();
+
+    auto* result_bar=new wxBoxSizer(wxHORIZONTAL);
+    result_group_=new wxChoice(this,wxID_ANY);
+    result_group_->Bind(wxEVT_CHOICE,[this](wxCommandEvent&) {
+        if(result_group_->GetSelection()!=wxNOT_FOUND) { result_table_->SetCurrentGroup(result_group_->GetSelection()); RefreshGrid(); }
+    });
+    result_summary_=new wxStaticText(this,wxID_ANY,wxString{},wxDefaultPosition,wxDefaultSize,wxST_ELLIPSIZE_END|wxST_NO_AUTORESIZE);
+    result_summary_->SetMinSize(wxSize(0,-1));
+    result_bar->Add(new wxStaticText(this,wxID_ANY,WxUtf8("结果组")),0,wxALIGN_CENTER_VERTICAL|wxRIGHT,6);
+    result_bar->Add(result_group_,0,wxRIGHT,8); result_bar->Add(result_summary_,1,wxALIGN_CENTER_VERTICAL);
+    root->Add(result_bar,0,wxEXPAND|wxLEFT|wxRIGHT|wxBOTTOM,8);
 
     result_grid_ = new wxGrid(this, wxID_ANY);
     result_grid_->SetDefaultCellOverflow(false);
     result_table_ = new CompareGridTable(report_groups_);
     result_grid_->SetTable(result_table_, true, wxGrid::wxGridSelectCells);
     result_grid_->EnableEditing(false);
+    result_grid_->Bind(wxEVT_GRID_SELECT_CELL,[this](wxGridEvent& event) { ShowDiffDetails(event.GetRow()); event.Skip(); });
     root->Add(result_grid_, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+    auto* details=new wxBoxSizer(wxHORIZONTAL);
+    auto detail=[&](const char* label,wxStaticText*& title,wxRichTextCtrl*& text) {
+        auto* box=new wxBoxSizer(wxVERTICAL);
+        title=new wxStaticText(this,wxID_ANY,WxUtf8(label));
+        text=new wxRichTextCtrl(this,wxID_ANY,wxString{},wxDefaultPosition,FromDIP(wxSize(-1,145)),wxRE_MULTILINE|wxRE_READONLY);
+        box->Add(title,0,wxBOTTOM,4); box->Add(text,1,wxEXPAND);
+        details->Add(box,1,wxEXPAND|wxRIGHT,6);
+    };
+    detail("正式原文",reference_detail_label_,reference_detail_);
+    detail("机器原文",actual_detail_label_,actual_detail_);
+    root->Add(details,0,wxEXPAND|wxLEFT|wxRIGHT|wxBOTTOM,8);
     SetSizer(root);
+    Bind(wxEVT_SIZE,[this](wxSizeEvent& event) { LayoutOptions(); event.Skip(); });
     RefreshGroups();
     RefreshGrid();
     InvalidateReport();
+}
+
+void ComparePanel::LayoutOptions() {
+    if (!GetSizer()) return;
+    Layout();
+    if (advanced_->IsExpanded()) {
+        // Wrapping needs the actual pane width before its cached best height is valid.
+        advanced_->GetPane()->InvalidateBestSize();
+        advanced_->InvalidateBestSize();
+        Layout();
+    }
 }
 
 void ComparePanel::BeginShutdown() {
@@ -170,21 +226,106 @@ void ComparePanel::OnOpenActual(wxCommandEvent&) {
 
 void ComparePanel::OnInputChanged(wxCommandEvent& event) {
     if(applying_options_ || !option_summary_) return;
-    try {
-        if(event.GetEventObject()==profile_) {
-            static constexpr const char* ids[]={"legacy_v1","strict_rows_v1","asr_cer_v1","asr_wer_v1"};
-            ApplyOptions(CompareService::Preset(ids[profile_->GetSelection()]));
+    if(event.GetEventObject()==language_label_ || event.GetEventObject()==reference_path_ || event.GetEventObject()==actual_path_) {
+        if(!filling_draft_) {
+            UpdateDraftState();
+            if(input_groups_.empty()) MarkInputChanged();
         }
-        const auto options=CurrentOptions();
-        CompareService::ValidateOptions(options);
+        event.Skip(); return;
+    }
+    if(event.GetEventObject()==profile_) {
+        static constexpr const char* ids[]={"legacy_v1","strict_rows_v1","asr_cer_v1","asr_wer_v1"};
+        ApplyOptions(CompareService::Preset(ids[profile_->GetSelection()]));
+    }
+    ObserveOptions();
+    if(event.GetEventType()!=wxEVT_TEXT) CommitOptions();
+    event.Skip();
+}
+
+void ComparePanel::ObserveOptions() {
+    if(applying_options_ || closing_) return;
+    try {
+        const auto options=CurrentOptions(); CompareService::ValidateOptions(options);
+        const bool changed=!options_valid_ || !observed_options_ || options!=*observed_options_;
+        observed_options_=options; options_valid_=true;
+        if(changed) MarkInputChanged();
         RefreshOptionState();
-        runtime_.UpdateConfig([&](AppConfig& config) { config.compare=options; });
-        runtime_.SaveConfig();
     } catch(const std::exception& ex) {
+        if(options_valid_) MarkInputChanged();
+        options_valid_=false;
+        option_summary_->SetLabel(WxUtf8("参数无效："+std::string(ex.what())));
+        if(compare_button_) compare_button_->Disable();
         if(status_) SetStatus(WxUtf8(ex.what()));
     }
-    MarkInputChanged();
-    event.Skip();
+}
+
+bool ComparePanel::CommitOptions() {
+    if(applying_options_ || closing_ || busy_ || !option_summary_) return false;
+    ObserveOptions();
+    if(!options_valid_) return false;
+    if(!runtime_.ConfigSaveAllowed()) return true;
+    const auto previous=runtime_.ConfigSnapshot().compare;
+    const auto options=CurrentOptions();
+    if(previous==options) return true;
+    try {
+        runtime_.SaveConfig([&](AppConfig& config) { config.compare=options; },
+            [](AppConfig& config,const AppConfig& before) { config.compare=before.compare; });
+        return true;
+    } catch(const std::exception& ex) {
+        SetStatus(WxUtf8("参数保存失败："+std::string(ex.what()))); return false;
+    }
+}
+
+void ComparePanel::UpdateDraftState() {
+    const auto found=std::find_if(input_groups_.begin(),input_groups_.end(),[&](const auto& group) { return editing_group_id_ && group.id==*editing_group_id_; });
+    if(found==input_groups_.end()) draft_dirty_=!language_label_->IsEmpty() || !reference_path_->IsEmpty() || !actual_path_->IsEmpty();
+    else draft_dirty_=found->label!=Utf8FromWx(language_label_->GetValue()) || found->reference_path!=PathFromWx(reference_path_->GetValue()) || found->actual_path!=PathFromWx(actual_path_->GetValue());
+    add_group_->Enable(!busy_ && !editing_group_id_);
+    apply_group_->Enable(!busy_ && editing_group_id_.has_value() && draft_dirty_);
+    cancel_group_->Enable(!busy_ && draft_dirty_);
+    remove_group_->Enable(!busy_ && editing_group_id_.has_value());
+    if(compare_button_) compare_button_->Enable(!busy_ && options_valid_ && (input_groups_.empty() || !draft_dirty_));
+}
+
+void ComparePanel::LoadGroupDraft(std::optional<std::uint64_t> id) {
+    const auto old_label=language_label_->GetValue(),old_reference=reference_path_->GetValue(),old_actual=actual_path_->GetValue();
+    filling_draft_=true;
+    editing_group_id_=id;
+    const auto found=std::find_if(input_groups_.begin(),input_groups_.end(),[&](const auto& group) { return id && group.id==*id; });
+    if(found==input_groups_.end()) {
+        editing_group_id_.reset(); language_label_->ChangeValue({}); reference_path_->ChangeValue({}); actual_path_->ChangeValue({});
+        group_list_->SetSelection(wxNOT_FOUND);
+    } else {
+        language_label_->ChangeValue(WxUtf8(found->label));
+        reference_path_->ChangeValue(WxUtf8(PathToUtf8(found->reference_path)));
+        actual_path_->ChangeValue(WxUtf8(PathToUtf8(found->actual_path)));
+        group_list_->SetSelection(static_cast<int>(found-input_groups_.begin()));
+    }
+    filling_draft_=false; UpdateDraftState();
+    if(input_groups_.empty() && (old_label!=language_label_->GetValue() || old_reference!=reference_path_->GetValue() || old_actual!=actual_path_->GetValue())) MarkInputChanged();
+}
+
+bool ComparePanel::ResolveGroupDraft() {
+    if(!draft_dirty_) return true;
+    wxMessageDialog dialog(this,WxUtf8("当前组有未应用的输入修改。"),WxUtf8("组草稿"),wxYES_NO|wxCANCEL|wxCANCEL_DEFAULT|wxICON_QUESTION);
+    dialog.SetYesNoCancelLabels(WxUtf8("应用"),WxUtf8("放弃草稿"),WxUtf8("取消"));
+    const auto answer=dialog.ShowModal();
+    if(answer==wxID_YES) return ApplyGroupDraft();
+    return answer==wxID_NO;
+}
+
+void ComparePanel::SelectInputGroup() {
+    if(busy_) return;
+    const int selection=group_list_->GetSelection();
+    if(selection==wxNOT_FOUND) return;
+    const auto requested=input_groups_.at(selection).id;
+    if(editing_group_id_==requested) return;
+    if(ResolveGroupDraft()) LoadGroupDraft(requested);
+    else {
+        int previous=wxNOT_FOUND;
+        for(std::size_t i=0;i<input_groups_.size();++i) if(editing_group_id_==input_groups_[i].id) previous=static_cast<int>(i);
+        group_list_->SetSelection(previous);
+    }
 }
 
 void ComparePanel::MarkInputChanged() {
@@ -200,41 +341,57 @@ void ComparePanel::InvalidateReport() {
 }
 
 void ComparePanel::OnAddGroup(wxCommandEvent&) {
+    if(!busy_ && !editing_group_id_) ApplyGroupDraft();
+}
+
+bool ComparePanel::ApplyGroupDraft() {
     const auto reference = PathFromWx(reference_path_->GetValue());
     const auto actual = PathFromWx(actual_path_->GetValue());
     if (reference.empty() || actual.empty()) {
         SetStatus(WxUtf8("请选择正式文本和机器文本"));
-        return;
+        return false;
     }
     CompareInputGroup group;
+    group.id=editing_group_id_.value_or(next_group_id_+1);
     group.label = Utf8FromWx(language_label_->GetValue());
     if (group.label.empty()) group.label = DefaultLabel(reference, input_groups_.size());
     const auto label = group.label;
     const auto duplicate = std::any_of(input_groups_.begin(), input_groups_.end(), [&](const CompareInputGroup& item) {
-        return item.label == label;
+        return item.label == label && item.id!=group.id;
     });
     if (duplicate) {
         SetStatus(WxUtf8("语言组名称不能重复"));
-        return;
+        return false;
     }
     group.reference_path = reference;
     group.actual_path = actual;
-    input_groups_.push_back(std::move(group));
-    MarkInputChanged();
+    auto found=std::find_if(input_groups_.begin(),input_groups_.end(),[&](const auto& item) { return item.id==group.id; });
+    bool changed=false;
+    if(found==input_groups_.end()) { ++next_group_id_; input_groups_.push_back(group); changed=true; }
+    else if(found->label!=group.label || found->reference_path!=group.reference_path || found->actual_path!=group.actual_path) { *found=group; changed=true; }
+    if(changed) MarkInputChanged();
     RefreshGroups();
+    LoadGroupDraft(group.id);
+    return true;
 }
 
 void ComparePanel::OnRemoveGroup(wxCommandEvent&) {
-    const int selection = group_list_->GetSelection();
-    if (selection != wxNOT_FOUND && static_cast<std::size_t>(selection) < input_groups_.size()) {
-        input_groups_.erase(input_groups_.begin() + selection);
+    if(busy_ || !editing_group_id_) return;
+    const auto id=*editing_group_id_;
+    if(!ResolveGroupDraft()) return;
+    const auto found=std::find_if(input_groups_.begin(),input_groups_.end(),[&](const auto& group) { return group.id==id; });
+    if(found!=input_groups_.end()) {
+        input_groups_.erase(found);
         MarkInputChanged();
         RefreshGroups();
+        LoadGroupDraft({});
     }
 }
 
 void ComparePanel::OnCompare(wxCommandEvent&) {
     if (busy_) return;
+    if(!input_groups_.empty() && draft_dirty_) { SetStatus(WxUtf8("有未应用的组草稿")); return; }
+    if(!CommitOptions()) return;
     const auto groups = CurrentInputGroups();
     CompareOptions options;
     try { options=CurrentOptions(); CompareService::ValidateOptions(options); }
@@ -307,14 +464,6 @@ void ComparePanel::OnCompare(wxCommandEvent&) {
                 if (captured_revision != input_revision_) return;
                 report_groups_ = std::make_shared<const std::vector<CompareReportGroup>>(std::move(reports));
                 report_revision_ = captured_revision;
-                try {
-                    runtime_.UpdateConfig([&](AppConfig& config) {
-                        config.compare=CurrentOptions();
-                    });
-                    runtime_.SaveConfig();
-                } catch (const std::exception& ex) {
-                    runtime_.Logger().Error("config", ex.what());
-                }
                 RefreshGrid();
                 SetBusy(false, WxUtf8(wer_without_boundaries?"对比完成；部分文本没有空白词界，建议使用 CER":"对比完成"));
             });
@@ -369,7 +518,6 @@ void ComparePanel::LoadFileInto(wxTextCtrl* target) {
     wxFileDialog dialog(this, WxUtf8("选择文本文件"), wxString{}, wxString{}, WxUtf8("Text files (*.txt)|*.txt|All files (*.*)|*.*"), wxFD_OPEN | wxFD_FILE_MUST_EXIST);
     if (dialog.ShowModal() == wxID_OK) {
         target->SetValue(dialog.GetPath());
-        MarkInputChanged();
     }
 }
 
@@ -395,8 +543,14 @@ CompareOptions ComparePanel::CurrentOptions() const {
     options.normalizer.ignore_punctuation=ignore_punctuation_->GetValue();
     options.normalizer.collapse_whitespace=collapse_whitespace_->GetValue();
     options.normalizer.trim=trim_->GetValue();
-    options.alignment={align_threshold_->GetValue(),anchor_threshold_->GetValue(),anchor_margin_->GetValue(),gap_penalty_->GetValue()};
-    options.pass_threshold=pass_threshold_->GetValue();
+    auto number=[](wxSpinCtrlDouble* control) {
+        double result{};
+        if(!control->GetTextValue().ToDouble(&result) || !std::isfinite(result) || result<control->GetMin() || result>control->GetMax())
+            throw std::invalid_argument("数值参数无效或超出范围");
+        return result;
+    };
+    options.alignment={number(align_threshold_),number(anchor_threshold_),number(anchor_margin_),number(gap_penalty_)};
+    options.pass_threshold=number(pass_threshold_);
     double percent=0;
     if(!max_error_->GetValue().ToDouble(&percent)) throw std::invalid_argument("最大错误率必须是有限非负数");
     options.max_error_rate=percent/100.0;
@@ -436,9 +590,11 @@ void ComparePanel::RefreshOptionState() {
     std::string summary=options.custom?"自定义（基于"+name+"）":name;
     summary+=" | "+CompareService::ValueLabel(options.metric);
     if(sequence && (options.metric==CompareMetric::Cer || options.metric==CompareMetric::Wer)) summary+=" | 自动句对齐后 CER/WER";
-    if(options.metric==CompareMetric::Indel) summary+=" | 红字为原文差异；归一化通过仍可能有红字";
+    if(options.metric==CompareMetric::Indel) summary+=" | 判定：归一化相似度";
+    if(options.metric==CompareMetric::Exact) summary+=" | 判定：原文完全一致";
     option_summary_->SetLabel(WxUtf8(summary));
     option_summary_->Wrap(std::max(300,GetClientSize().GetWidth()-24));
+    if(compare_button_) compare_button_->Enable(!busy_ && options_valid_ && (input_groups_.empty() || !draft_dirty_));
     Layout();
 }
 
@@ -449,12 +605,14 @@ std::string ComparePanel::CurrentDelimiter() const {
 void ComparePanel::RefreshGroups() {
     group_list_->Clear();
     for (const auto& group : input_groups_) {
-        group_list_->Append(WxUtf8(group.label + ": " + PathToUtf8(group.reference_path) + " / " + PathToUtf8(group.actual_path)));
+        const auto index=group_list_->Append(WxUtf8(group.label));
+        if(editing_group_id_==group.id) group_list_->SetSelection(static_cast<int>(index));
     }
-    remove_group_->Enable(!input_groups_.empty());
+    UpdateDraftState();
 }
 
 void ComparePanel::RefreshGrid() {
+    if(!result_grid_ || !result_table_) return;
     result_grid_->Freeze();
     const int old_rows = result_grid_->GetNumberRows();
     const int old_cols = result_grid_->GetNumberCols();
@@ -477,10 +635,61 @@ void ComparePanel::RefreshGrid() {
     }
     result_grid_->SetColLabelSize(2 * result_grid_->GetCharHeight() + 12);
     for (int c = 0; c < result_grid_->GetNumberCols(); ++c) {
-        result_grid_->SetColSize(c, c % 4 == 2 ? 180 : (c % 4 == 3 ? 140 : 260));
+        result_grid_->SetColSize(c, FromDIP(c==2 ? 155 : (c==3 ? 85 : 300)));
     }
     result_grid_->ForceRefresh();
     result_grid_->Thaw();
+    result_group_->Clear();
+    for(const auto& report:*report_groups_) result_group_->Append(WxUtf8(report.label));
+    result_group_->Enable(!report_groups_->empty());
+    if(!report_groups_->empty()) {
+        result_group_->SetSelection(static_cast<int>(result_table_->CurrentGroup()));
+        const auto& report=report_groups_->at(result_table_->CurrentGroup());
+        std::size_t ok{},ng{},missing{},extra{};
+        for(const auto& row:report.rows) {
+            switch(row.status) {
+                case CompareStatus::Ok: ++ok; break;
+                case CompareStatus::Ng: ++ng; break;
+                case CompareStatus::Missing: ++missing; break;
+                case CompareStatus::Extra: ++extra; break;
+            }
+        }
+        const auto& t=report.totals;
+        auto summary="OK "+std::to_string(ok)+" / NG "+std::to_string(ng)+" / MISSING "+std::to_string(missing)+" / EXTRA "+std::to_string(extra);
+        summary+=" | S/D/I/N "+std::to_string(t.substitutions)+"/"+std::to_string(t.deletions)+"/"+std::to_string(t.insertions)+"/"+std::to_string(t.reference_units);
+        if(report.options.metric==CompareMetric::Cer || report.options.metric==CompareMetric::Wer) {
+            const auto rate=t.ErrorRate();
+            summary+=" | "+CompareService::ValueLabel(report.options.metric)+": "+(rate ? Utf8FromWx(wxString::Format("%.2f%%",*rate*100)) : std::string("N=0，未定义"));
+        }
+        result_summary_->SetLabel(WxUtf8(summary)); result_summary_->SetToolTip(WxUtf8(summary));
+    } else result_summary_->SetLabel({});
+    ShowDiffDetails(result_grid_->GetGridCursorRow());
+}
+
+void ComparePanel::ShowDiffDetails(int row) {
+    if(!reference_detail_ || !actual_detail_) return;
+    reference_detail_->Clear(); actual_detail_->Clear();
+    reference_detail_label_->SetLabel(WxUtf8("正式原文")); actual_detail_label_->SetLabel(WxUtf8("机器原文"));
+    if(report_groups_->empty() || row<0 || static_cast<std::size_t>(row)>=report_groups_->at(result_table_->CurrentGroup()).rows.size()) return;
+    const auto& item=report_groups_->at(result_table_->CurrentGroup()).rows.at(row);
+    auto render=[](wxRichTextCtrl* control,const std::string& raw,const std::vector<DiffFragment>& fragments) {
+        std::string reconstructed;
+        for(const auto& fragment:fragments) reconstructed+=fragment.text;
+        if(reconstructed!=raw) throw std::runtime_error("原文差异片段无法完整重建");
+        control->Freeze();
+        for(const auto& fragment:fragments) {
+            control->BeginTextColour(fragment.kind==DiffKind::Same ? wxColour(24,24,24) : wxColour(190,30,40));
+            control->WriteText(WxUtf8(fragment.text));
+            control->EndTextColour();
+        }
+        control->SetInsertionPoint(0); control->ShowPosition(0); control->Thaw();
+    };
+    try {
+        if(item.reference_index) render(reference_detail_,item.reference_text,item.diff.reference_fragments);
+        else reference_detail_label_->SetLabel(WxUtf8("正式侧不存在记录（EXTRA）"));
+        if(item.actual_index) render(actual_detail_,item.actual_text,item.diff.actual_fragments);
+        else actual_detail_label_->SetLabel(WxUtf8("机器侧不存在记录（MISSING）"));
+    } catch(const std::exception& ex) { SetStatus(WxUtf8(ex.what())); }
 }
 
 void ComparePanel::SetBusy(bool busy, const wxString& message) {
@@ -492,9 +701,8 @@ void ComparePanel::SetBusy(bool busy, const wxString& message) {
     if (actual_browse_) actual_browse_->Enable(!busy);
     delimiter_->Enable(!busy);
     RefreshOptionState();
-    add_group_->Enable(!busy);
-    remove_group_->Enable(!busy && !input_groups_.empty());
-    compare_button_->Enable(!busy);
+    group_list_->Enable(!busy); new_group_->Enable(!busy);
+    UpdateDraftState();
     cancel_button_->Enable(busy && comparing_ && !comparison_cancel_.stop_requested());
     export_button_->Enable(!busy && report_groups_ && !report_groups_->empty() && report_revision_ == input_revision_);
     SetStatus(message);
