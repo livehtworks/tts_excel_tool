@@ -125,6 +125,18 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 
 ## wxWidgets And Acceptance Timing
 
+- Window destruction evidence must observe the real native event, not the
+  `Destroy()` request. The desktop links `comctl32` for `SetWindowSubclass`;
+  the wxApp-owned callback records a primitive timestamp after default
+  `WM_NCDESTROY` processing, with no access to a destroyed frame or Runtime.
+  Persist it in OnExit after Runtime's logger closes. Idle/paused native-close
+  traces are subcases, not the entire long-task shutdown matrix.
+- The P4 `--r2-cache-contracts` case uses real Arctic, Xiao Ya and Ukrainian
+  models. It shares the regular P4 target and is also called by its full suite.
+  Cancellation at the existing native-return callback is a deterministic
+  real-engine boundary: stopping after Load must not enter Synthesize; stopping
+  after Synthesize must not fill the cache. Keep both checks.
+
 - Windows test executables that exercise the same Unicode/long-path IO as the
   application must embed its manifest. Missing `longPathAware` caused P5 cache
   temporary creation to fail in a deep isolated directory while the desktop

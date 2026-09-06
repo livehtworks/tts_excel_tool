@@ -173,6 +173,94 @@ void TestNativeAdmissionInvalidatesChangedTokens() {
     REQUIRE(restored.audio->samples==seed.audio->samples);
 }
 
+void TestNativeCacheIdentityContracts() {
+    const auto models=std::filesystem::path(ADAYO_MODELS_DIR)/"sherpa";
+    const auto arctic=ModelRegistry::LoadModelJson(models/"vits-piper-en_US-arctic-medium/model.json");
+    const auto chinese=ModelRegistry::LoadModelJson(models/"vits-piper-zh_CN-xiao_ya-medium-int8/model.json");
+    const auto ukrainian=ModelRegistry::LoadModelJson(models/"vits-piper-uk_UA-ukrainian_tts-medium/model.json");
+    const auto root=test::IsolatedRoot()/"native-cache-contracts";
+    TtsService service;
+    service.SetEngine(std::make_unique<SherpaOnnxTtsEngine>());
+    service.InitializeCache(root,{});
+    auto prepare=[&](const std::string& id,const TtsModelConfig& config,const std::string& text,double speed=1.0) {
+        auto result=service.Prepare(id,config,{text,config.language_code,config.speaker_id,speed});
+        RequireUsableAudio(*result.audio);
+        std::cout << "NATIVE_CONTRACT id=" << id << " speaker=" << config.speaker_id
+                  << " threads=" << config.num_threads << " rules=" << config.rule_fsts
+                  << " key=" << result.timings.key << " source=" << result.timings.source
+                  << " load=" << result.timings.load_call_delta << " synth=" << result.timings.synth_call_delta << '\n';
+        return result;
+    };
+    const std::string text="The same text belongs to two distinct speakers.";
+    auto first_config=arctic.config; first_config.speaker_id=0;
+    auto second_config=arctic.config; second_config.speaker_id=1;
+    const auto first=prepare(arctic.id,first_config,text);
+    const auto second=prepare(arctic.id+"::speaker-1",second_config,text);
+    REQUIRE(first.timings.load_call_delta==1);
+    REQUIRE(second.timings.load_call_delta==0);
+    REQUIRE(first.timings.synth_call_delta==1 && second.timings.synth_call_delta==1);
+    REQUIRE(first.timings.key!=second.timings.key);
+    REQUIRE(first.audio->samples!=second.audio->samples);
+    const auto again=prepare(arctic.id,first_config,text);
+    REQUIRE(again.timings.source=="memory" && again.timings.load_call_delta==0 && again.timings.synth_call_delta==0);
+    REQUIRE(again.timings.key==first.timings.key && again.audio->samples==first.audio->samples);
+    const auto other_again=prepare(arctic.id+"::speaker-1",second_config,text);
+    REQUIRE(other_again.timings.source=="memory" && other_again.audio->samples==second.audio->samples);
+    ++second_config.num_threads;
+    const auto threads=prepare(arctic.id+"::speaker-1",second_config,text);
+    REQUIRE(threads.timings.key!=second.timings.key);
+    REQUIRE(threads.timings.load_call_delta==1 && threads.timings.synth_call_delta==1);
+
+    const auto zh=prepare(chinese.id,chinese.config,"今天是九月六日。");
+    REQUIRE(zh.timings.load_call_delta==1 && zh.timings.synth_call_delta==1);
+    auto without_rules=chinese.config;
+    REQUIRE(!without_rules.rule_fsts.empty());
+    without_rules.rule_fsts.clear();
+    const auto rules=prepare(chinese.id,without_rules,"今天是九月六日。");
+    REQUIRE(rules.timings.key!=zh.timings.key);
+    REQUIRE(rules.timings.load_call_delta==1 && rules.timings.synth_call_delta==1);
+    const auto rules_restored=prepare(chinese.id,chinese.config,"今天是九月六日。");
+    REQUIRE(rules_restored.timings.source=="memory" && rules_restored.timings.load_call_delta==0);
+    REQUIRE(rules_restored.audio->samples==zh.audio->samples);
+    const auto restored_miss=prepare(chinese.id,chinese.config,"欢迎使用语料工具。");
+    REQUIRE(restored_miss.timings.load_call_delta==1 && restored_miss.timings.synth_call_delta==1);
+
+    REQUIRE(ukrainian.config.text_normalization=="nfd");
+    const auto nfd=prepare(ukrainian.id,ukrainian.config,"Добрий день.",0.49);
+    const auto clamped=prepare(ukrainian.id,ukrainian.config,"Добрий день.",0.5);
+    REQUIRE(nfd.timings.load_call_delta==1 && nfd.timings.synth_call_delta==1);
+    REQUIRE(clamped.timings.source=="memory" && clamped.timings.key==nfd.timings.key);
+    REQUIRE(clamped.audio->samples==nfd.audio->samples);
+    const auto enabled=service.Cache()->Stats().entries;
+    std::stop_source cancel;
+    bool returned=false;
+    service.SetNativeReturnHandler([&](std::string_view operation) {
+        if(operation=="synthesize") { returned=true; cancel.request_stop(); }
+    });
+    bool canceled=false;
+    try { service.Prepare(ukrainian.id,ukrainian.config,{"До побачення.","uk-UA",ukrainian.config.speaker_id,1.0},cancel.get_token()); }
+    catch(const std::exception& ex) { canceled=std::string(ex.what())=="TTS_CANCELED"; }
+    REQUIRE(returned && canceled);
+    REQUIRE(service.Cache()->Stats().entries==enabled);
+    REQUIRE(service.ActiveModelId()==ukrainian.id);
+    service.SetNativeReturnHandler({});
+    const auto retry=prepare(ukrainian.id,ukrainian.config,"До побачення.");
+    REQUIRE(retry.timings.source=="synth" && retry.timings.load_call_delta==0 && retry.timings.synth_call_delta==1);
+    std::stop_source cancel_load;
+    bool load_returned=false, synthesized_after_cancel=false;
+    service.SetNativeReturnHandler([&](std::string_view operation) {
+        if(operation=="load") { load_returned=true; cancel_load.request_stop(); }
+        if(operation=="synthesize") synthesized_after_cancel=true;
+    });
+    canceled=false;
+    try { service.Prepare(arctic.id,first_config,{"Cancel when model loading returns.","en-US",0,1.0},cancel_load.get_token()); }
+    catch(const std::exception& ex) { canceled=std::string(ex.what())=="TTS_CANCELED"; }
+    REQUIRE(load_returned && canceled);
+    REQUIRE(!synthesized_after_cancel);
+    service.SetNativeReturnHandler({});
+    std::cout << "PASS native SID/cache, thread/model/rule reload, pinyin/eSpeak/NFD, speed clamp, cancel at native return without cache refill\n";
+}
+
 void TestSherpaUnicodePathGate() {
     const std::filesystem::path source_root = std::filesystem::path(ADAYO_MODELS_DIR) / "sherpa";
     const auto gate_root = test::IsolatedRoot() /
@@ -282,6 +370,8 @@ void VerifyLoopback(const AudioBuffer& audio,const std::vector<float>& captured,
 #endif
 
 static int RunMain(int argc, char** argv) {
+    if(argc==2 && std::string(argv[1])=="--r2-cache-contracts")
+        return test::RunTestMain("R2_NATIVE_CACHE_CONTRACTS",TestNativeCacheIdentityContracts);
     if (argc==6 && std::string(argv[1])=="--r2-perf") {
         return test::RunTestMain("R2_NATIVE_PERFORMANCE",[&] {
             const auto root=PathFromUtf8(argv[2]);
@@ -453,6 +543,7 @@ static int RunMain(int argc, char** argv) {
         // otherwise an earlier ASCII path can conceal an encoding failure.
         TestSherpaUnicodePathGate();
         TestNativeAdmissionInvalidatesChangedTokens();
+        TestNativeCacheIdentityContracts();
         TestSherpaSmokeAndSwitching();
         TestSherpaRepeatedGeneration();
     });

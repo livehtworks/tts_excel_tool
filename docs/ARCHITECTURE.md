@@ -88,7 +88,7 @@ Audio device callback/thread由 miniaudio 自身管理，PlaybackService 持有�
 Worker 完成后用 wxThreadEvent / CallAfter 回 UI。
 ```
 
-项目自建 worker 固定为 2 条：`BackgroundJobWorker` 和 `PlaybackWorker`。第一版不引入线程池、事件总线、actor、协程框架。
+业务 worker 固定为 2 条：`BackgroundJobWorker` 和 `PlaybackWorker`。R2 关闭时由 ApplicationRuntime 持有至多一条可 join 的收尾线程，只等待业务 worker、设备、缓存与引擎退出，不接收新业务。MainFrame 的 timer 等待完成后销毁窗口；wxApp 从真实 WM_NCDESTROY 默认处理返回处捕获时间，在 Runtime 日志关闭后顺序追加该诊断。不存在并行运行所有者、线程池、事件总线、actor 或协程框架。
 
 ## 4. TTS 生命周期
 
@@ -98,6 +98,7 @@ Worker 完成后用 wxThreadEvent / CallAfter 回 UI。
 - 同一 voice 连续合成默认复用 engine；
 - 切换 voice 时显式 unload/load；
 - UI 只构造播放请求，不在 wx 事件处理函数里加载或卸载 TTS 模型；
+- 原生加载返回后重新检查取消，再决定是否合成；原生合成返回后取消的请求不播放、不回填缓存；
 - 任何 backend 错误直接显示，不做隐藏 fallback；
 - sherpa-onnx 的具体 API/version 只允许存在于 `SherpaOnnxTtsEngine`；
 - MOSS 推理图的具体 orchestration 只允许存在于 `MossNanoTtsEngine`。

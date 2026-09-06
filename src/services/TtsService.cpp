@@ -179,6 +179,7 @@ PreparedAudio TtsService::Prepare(std::string_view model_id, const TtsModelConfi
         const bool needsLoad=!engine_->IsLoaded() || active_identity_!=identities.load;
         EnsureLocked(model_id,config,identities.load);
         result.timings.load_call_delta=needsLoad ? 1 : 0; result.timings.model_load_ms=Ms(checkpoint);
+        if (token.stop_requested()) throw std::runtime_error("TTS_CANCELED");
         checkpoint=Clock::now(); result.audio=std::make_shared<AudioBuffer>(SynthesizeLocked(effective));
         result.timings.synth_ms=Ms(checkpoint); result.timings.synth_call_delta=1; result.timings.source="synth";
         AudioCache::Validate(*result.audio);

@@ -59,6 +59,35 @@ statuses are not upgraded by R2 tests. Historical ENV-02 evidence remains missin
 
 These are subcase results, not full-item or overall acceptance:
 
+- F1/F3 continuation: desktop WM_NCDESTROY timestamps close the previously
+  missing diagnostic implementation. Idle and real memory-hit paused playback
+  exit completely. Paused cancellation -> worker joined is 65.17 ms, and
+  cancellation -> native window destroyed is 446.10 ms. Evidence:
+  `native/ui-f1/paused-close-0.jpg`, `native/app-f1-full/logs/`.
+  Native load/slow-synthesis close still needs its corresponding GUI evidence.
+- The user confirms normal listening for the 47-row English sequence. Full
+  registry GUI has 2704 entries, selects Amy and renders LibriTTS speakers.
+  Follow-off playback preserves the manually scrolled viewport; paused follow
+  activation does not jump. Evidence: `native/ui-f1/`. These are not all-voice
+  listening or DPI claims.
+- F2 real Sherpa contracts reproduced canceled Load continuing into Synthesize
+  (`native/stage-f2-native-contracts-red.log`, assertion
+  `!synthesized_after_cancel`). F3 checks cancellation again after Load and the
+  same native case passes (`native/stage-f3-native-contracts.log`). It also
+  verifies different SID keys/PCM, same-SID hits, thread/model/rule reload,
+  pinyin/eSpeak/NFD, speed clamping and no fill when canceled at native return.
+- F3 runtime/config: a real Windows handle denies config replacement. Bytes and
+  effective settings remain unchanged, retry succeeds after unlocking, and a
+  new Runtime reloads the latest independent fields. Evidence:
+  `native/stage-f3-workbook-runtime.log`. F3 targeted Release is 6/6 in 7.94 s
+  (`native/stage-f3-tests.log`), separate from the real native contract test.
+- F1 repeats three rounds of 50 old-v1 memory/disk keys for four voices. Keys
+  and PCM match baseline, all hits have zero engine calls. Amy memory p95 is
+  104.38 -> 117.09 ms, still above the investigation threshold. Its lookup mean
+  drops to about 0.60 ms but resource validation dominates. Retain this result
+  with older outliers; no CACHE03-D PASS yet. Evidence:
+  `hit-recheck-f1/after/performance-summary.json` and its per-round CSV logs.
+
 - E3 full Release regression: 7/7 PASS in 724.17 seconds, including the original
   private fixtures and 1000 native syntheses. E3 Core: 4/4 PASS. Evidence:
   `native/stage-e3-full-tests.log`, `native/stage-e3-core-tests.log`.
@@ -152,7 +181,8 @@ workbook (`protection-after-e4.log`). Historical whole-backup evidence is not in
 Remaining full-item evidence includes full GUI/DPI/device/lifecycle and composite
 cache matrices. `acceptance_results.json` in the private evidence root records
 individual work-package assertions separately from the partial native/GUI results.
-The current assertion snapshot is 17 PASS / 41 NOT_RUN. NOT_RUN denotes an
+The last published assertion snapshot is 17 PASS / 41 NOT_RUN; F1/F3 evidence
+above has not yet been reconciled into that external snapshot. NOT_RUN denotes an
 unproven complete assertion, even where individual subcases have passed. E5
 targeted regression passes 6/6 in 11.72 seconds. Reproduction entry points use
 the external run root (`<run>`) and disposable fixture paths:
@@ -172,11 +202,13 @@ paths are retained in external `build-native.cmd`, `build-core.cmd` and
 `build-only.cmd`; source/executable/evidence SHA256 values are in the assertion
 snapshot. Do not regenerate the protection-before baseline.
 
-Active desktop input interrupted further E1 GUI automation. Its unsaved isolated
-session was left open, not discarded or forcibly terminated. Remaining acceptance
+Active desktop input interrupted E1 GUI automation; that session was not discarded
+or forcibly terminated by the agent. F1 continues in a separate isolated program.
+Remaining acceptance
 includes the complete dirty/export-leave flow, actual playback/pause/live-clear
 matrix, full registry and multi-group interaction, DPI, and all long-task close
-cases. Exact `window_destroyed` instrumentation/evidence is still missing;
+cases. Actual `window_destroyed` instrumentation now exists, with idle and paused
+close evidence. The active-native four-phase trace still needs verification;
 `native_returned` and `worker_joined` alone do not establish QA01-D. Performance
 outliers remain disclosed above. The source handoff must not be described as all
 R2 work completed. No existing runtime was replaced and no ZIP was created.

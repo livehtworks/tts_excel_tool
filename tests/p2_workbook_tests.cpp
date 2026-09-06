@@ -11,10 +11,14 @@
 #include <nlohmann/json.hpp>
 #include <cstdlib>
 #include <map>
+#include <memory>
 #include <chrono>
 #include <future>
 #ifdef ADAYO_CAN_TEST_RUNTIME
 #include "app/ApplicationRuntime.h"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #endif
 
 #include "TestCheck.h"
@@ -697,6 +701,7 @@ static void TestRuntimeSaveOrderingAndControlledShutdown() {
             AtomicFileOperations::Replace(from,to);
         }
     } io;
+    {
     ApplicationRuntime runtime(root,&io);
     std::promise<void> old_requested,allow_old;
     auto allowed=allow_old.get_future().share();
@@ -753,6 +758,29 @@ static void TestRuntimeSaveOrderingAndControlledShutdown() {
     REQUIRE(store.Load().compare.profile_id=="asr_cer_v1");
     REQUIRE(store.Load().last_sheet=="concurrent-field"); REQUIRE(store.Load().audio_cache.enabled);
 
+#ifdef _WIN32
+    const auto before_locked_save=FileSha256(store.Path());
+    const auto handle=CreateFileW(store.Path().c_str(),GENERIC_READ,FILE_SHARE_READ,
+        nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    REQUIRE(handle!=INVALID_HANDLE_VALUE);
+    const auto close=[](void* value) { CloseHandle(value); };
+    std::unique_ptr<void,decltype(close)> held(handle,close);
+    std::string locked_save_error;
+    try {
+        runtime.SaveConfig([](AppConfig& config) { config.audio_cache.enabled=false; },
+            [](AppConfig& config,const AppConfig& before) { config.audio_cache=before.audio_cache; });
+    } catch(const std::exception& ex) { locked_save_error=ex.what(); }
+    REQUIRE(!locked_save_error.empty());
+    REQUIRE(FileSha256(store.Path())==before_locked_save);
+    REQUIRE(runtime.ConfigSnapshot().audio_cache.enabled);
+    REQUIRE(store.Load().audio_cache.enabled);
+    held.reset();
+    runtime.SaveConfig([](AppConfig& config) { config.audio_cache.enabled=false; },
+        [](AppConfig& config,const AppConfig& before) { config.audio_cache=before.audio_cache; });
+    REQUIRE(!store.Load().audio_cache.enabled);
+    std::cout << "PASS runtime real config sharing violation: unchanged bytes, field rollback, unlocked retry\n";
+#endif
+
     std::promise<void> job_entered,job_release;
     auto job_released=job_release.get_future().share();
     runtime.BackgroundJobs().Submit([&](std::stop_token) { job_entered.set_value(); job_released.wait(); });
@@ -764,6 +792,20 @@ static void TestRuntimeSaveOrderingAndControlledShutdown() {
     job_release.set_value(); runtime.Shutdown();
     REQUIRE(was_waiting); REQUIRE(job_rejected); REQUIRE(runtime.ShutdownComplete());
     runtime.Shutdown();
+    }
+    {
+        ApplicationRuntime restarted(root);
+        const auto restored=restarted.ConfigSnapshot();
+        REQUIRE(restored.compare.profile_id=="asr_cer_v1");
+        REQUIRE(restored.audio_cache.disk_limit_bytes==1024ull*1024*1024);
+        REQUIRE(restored.last_sheet=="concurrent-field");
+#ifdef _WIN32
+        REQUIRE(!restored.audio_cache.enabled);
+#endif
+        restarted.Shutdown();
+        REQUIRE(restarted.ShutdownComplete());
+    }
+    std::cout << "PASS runtime save ordering: delayed old save, IO barrier, field rollback, complete runtime restart\n";
 }
 #endif
 

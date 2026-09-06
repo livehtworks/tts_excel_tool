@@ -28,6 +28,18 @@ Current phase: R2 safety/interaction/cache source handoff with incomplete compos
 
 ## Verification And Remaining Acceptance
 
+- F1/F3 continuation: native window-destruction timestamps now exist. Idle and
+  real paused-playback close exit without a process remaining; the user confirms
+  the 47-row English sequence sounds normal. Full-registry GUI selects Amy and
+  displays LibriTTS speakers; this is not complete selection-set/DPI coverage.
+  A new real Sherpa contract test exposed synthesis continuing after cancellation
+  at model-load return. The missing boundary check is fixed and the same case
+  passes, together with SID separation, thread/rule/model reload, NFD and speed
+  clamping. Real Windows config file locking, field rollback, unlocked retry and
+  full Runtime restart pass. F3 targeted Release: 6/6 in 7.94 seconds, plus the
+  dedicated native contract case. F1 performance retains an Amy memory p95
+  regression; analysis and composite GUI/lifecycle acceptance remain active.
+
 - R2 current checkpoint: reported mapping-selection crash and advanced-pane
   zero-height grid are fixed. E1 GUI additionally verifies speaker-name search,
   multiline editing, dirty-leave cancellation and rejection/recovery of duplicate

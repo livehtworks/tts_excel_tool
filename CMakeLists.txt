@@ -175,7 +175,7 @@ if(ADAYO_BUILD_DESKTOP)
         src/ui/ComparePanel.cpp
     )
     target_include_directories(AdayoCorpusTool PRIVATE src)
-    target_link_libraries(AdayoCorpusTool PRIVATE adayo_core ${wxWidgets_LIBRARIES})
+    target_link_libraries(AdayoCorpusTool PRIVATE adayo_core ${wxWidgets_LIBRARIES} comctl32)
     if(MSVC)
         target_link_options(AdayoCorpusTool PRIVATE
             "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/src/app/AdayoCorpusTool.exe.manifest")
