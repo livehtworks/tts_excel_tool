@@ -2,6 +2,13 @@
 
 ## Windows / MSVC
 
+- In PowerShell, pass `rg -g '*.cpp' directory` or exact file paths. Literal
+  `directory/*.cpp` operands are not shell-expanded on Windows.
+- R2 native admission links the existing Sherpa package's `onnxruntime.lib` and
+  DLL, not a second runtime. Set `ADAYO_ONNXRUNTIME_INCLUDE_DIR` to matching
+  upstream C API headers. The local pinned DLL reports 1.27.1; its matching
+  headers require `onnxruntime_c_api.h` and `onnxruntime_ep_c_api.h` (API 27).
+
 - `cl.exe` is not available in a plain PowerShell session on this machine.
 - Use VS2022 dev environment before CMake build commands:
 
@@ -81,6 +88,18 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 
 ## Voice Preparation
 
+- R2 preparation requires exactly one `--only <voice>` and an offline target.
+  Recovery and fault experiments must use physical isolated copies. The writer
+  uses an abandoned-owner-aware Windows mutex and initially requests DELETE
+  access to the current config to exclude native readers; after its durable
+  incomplete marker is established it releases that handle before replacement.
+  Keeping an exclusive directory handle prevents Windows child renames. Keeping
+  the old config DELETE handle through final replacement also fails on this
+  machine. Do not remove these barriers without preserving reader exclusion.
+- Python's ordinary file reads do not share DELETE access. Preparation uses a
+  native shared read handle while inspecting backups under its reader barrier.
+  Journals and candidates remain in the unique transaction directory on failure.
+
 - Piper JSON phoneme maps contain distinct uppercase/lowercase keys. PowerShell must use `ConvertFrom-Json -AsHashtable`; ordinary object conversion fails on `X`/`x`. Stop on parsing errors before counting resources.
 - Count model/quality variants, named voice datasets, base languages, locales and speaker slots separately. Speaker slots across qualities/corpora are not a deduplicated human-voice count.
 - Build target names are `adayo_p2_tests` and `adayo_p4_tts_tests`, not the source filenames. Native voice probes use the production adapter without initializing an audio cache and write diagnostics only to per-run disposable roots.
@@ -105,6 +124,35 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 - UCRT `api-ms-win-*` imports can be loader contracts without physical sibling DLLs. Packaging resolves only API-set names through the System32-only Windows loader and verifies the resulting module path; an arbitrary or nonexistent name is never accepted by prefix alone.
 
 ## wxWidgets And Acceptance Timing
+
+- Windows test executables that exercise the same Unicode/long-path IO as the
+  application must embed its manifest. Missing `longPathAware` caused P5 cache
+  temporary creation to fail in a deep isolated directory while the desktop
+  binary worked. Add the `.manifest` with `target_sources` for test targets;
+  `/MANIFESTINPUT` alone fails MSVC incremental Debug linking with LNK1220.
+  Create the isolated TEMP/TMP directory before assigning those environment
+  variables. Preserve failing logs when correcting the harness environment.
+- The desktop automation helper can detect concurrent user input. Reobserve
+  once, then suspend input automation when the user is actively typing; do not
+  discard the open test session or classify interrupted GUI cases as PASS.
+- `wxGrid::AppendRows` can synchronously dispatch cell-selection events before
+  row population finishes. `Freeze` only suspends painting, not events. Prepare
+  row side-state before structural edits and guard projection callbacks until
+  the grid is complete; restore the guard and painting with scope-bound cleanup.
+  R2 mapping regression uses first/repeated analysis, fewer columns, last-row
+  details and zero-column results from an isolated original-workbook copy.
+- Include `wx/collpane.h` instead of forward-declaring `wxCollapsiblePane`:
+  this Windows build maps it to `wxGenericCollapsiblePane`. Specify
+  `wxCP_NO_TLW_RESIZE` for page sections, otherwise expanding the pane fits
+  and shrinks the top-level window, potentially reducing the grid to zero height.
+  Wrapped controls also cache their initial narrow-pane best height. After the
+  first layout supplies the actual width, invalidate the inner pane and outer
+  collapsible pane best sizes and lay out again on expansion/window resize.
+  Preventing top-level resize alone does not fix the zero-height result grid.
+- `ADAYO_REVIEW_WORKPACK` is consumed by P2, P6 and P7. An isolated copy needs
+  `workbook_acceptance.json`, its workbook, `compare_cases.json` and
+  `text_import_cases.json` and its `text_import/` files; copying only the
+  workbook fixture makes P6 fail.
 
 - A shrinking status label needs both a zero minimum width and `wxST_NO_AUTORESIZE | wxST_ELLIPSIZE_END`. `SetLabel` otherwise expands the native control over adjacent buttons even when the sizer has a bounded width.
 - Comparison grid labels use separate group/metric lines and a metric-width column so metric units remain readable. Grid cell overflow is disabled in mapping/runtime/compare views.

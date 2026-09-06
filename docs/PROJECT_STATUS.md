@@ -1,6 +1,6 @@
 # Project Status
 
-Current phase: source publication and GPT research handoff after downloaded voice configuration. Piper inventory is 174 variants / 50 languages / 55 locales; 171 variants and all 2703 associated speaker slots pass native synthesis. Three variants need additional native frontend capability, and MOSS native inference remains unimplemented. Resource details and warnings are in `docs/VOICE_RESOURCES.md` and `docs/VOICE_RESOURCE_INVENTORY.json`. Prior full Release 7/7 (including fresh Unicode initialization and 500 EN + 500 ZH generations), Core 4/4 and eight preparation contracts pass. The 170 prepared weights pass original-prefix/prepared SHA256 and hard-link checks. The user now authorizes source commit/push including the voice-configuration work and `docs/GPT_RESEARCH_HANDOFF_20260906.md`; the proposed missing capabilities are not implemented by this handoff. The earlier work-package acceptance remains 29 PASS / 7 NOT_RUN, not an overall acceptance PASS; its evidence is indexed in `docs/REVIEW_EXECUTION_20260906.md`.
+Current phase: R2 safety/interaction/cache source handoff with incomplete composite acceptance. Baseline `5b7bee0` matched local/remote preflight with a clean worktree. Current execution and item statuses are in `docs/R2_SAFETY_UI_CACHE_REVIEW_20260906.md`; raw evidence and independent builds are outside the repository. No R2 overall PASS is claimed. The latest user request authorizes source commit/push; canonical model writes, production EXE replacement and ZIP remain excluded. The prior voice inventory remains 174 Piper variants / 50 languages / 55 locales, with historical synthesis checks for 171 variants and 2703 speaker slots. Three frontends and MOSS native inference remain unimplemented, and six variants retain historical phoneme warnings. The earlier work-package acceptance remains 29 PASS / 7 NOT_RUN, not an overall acceptance PASS; its evidence is indexed in `docs/REVIEW_EXECUTION_20260906.md`.
 
 ## Architecture And Ownership
 
@@ -28,11 +28,22 @@ Current phase: source publication and GPT research handoff after downloaded voic
 
 ## Verification And Remaining Acceptance
 
-- Current Release 7/7 passes, including 500 EN + 500 ZH real generations, model switching and Unicode-path initialization before any ASCII espeak load. Core 4/4 passes with explicit reduced Unicode capability. Resource preparation contracts pass 8/8; registry coverage is 171 downloaded models / 2703 speaker slots, plus the existing Xiao Ya INT8 entry.
+- R2 current checkpoint: reported mapping-selection crash and advanced-pane
+  zero-height grid are fixed. E1 GUI additionally verifies speaker-name search,
+  multiline editing, dirty-leave cancellation and rejection/recovery of duplicate
+  tokens. E3 full Release 7/7 (including 1000 native generations), E3 Core 4/4,
+  and preparation 15/15 pass. E4 also measures 50 alternating-speaker real
+  syntheses with one initial load. E5 rebuilds the subsequent mapping-file-error
+  and shutdown-start ordering fixes; its targeted regression is indexed in the
+  review document. Partial-clear and abnormal-exit cache tests use real files.
+  Scoped protected-file comparison passes 758 records. These are partial R2
+  results, not complete interaction/device/DPI/lifecycle acceptance. Evidence
+  and remaining assertions are indexed by the current R2 review document.
+- Pre-R2 handoff Release 7/7 passed, including 500 EN + 500 ZH real generations, model switching and Unicode-path initialization before any ASCII espeak load. That handoff's Core 4/4 and preparation 8/8 are historical results, not current R2 totals. Its registry coverage was 171 downloaded models / 2703 speaker slots, plus the existing Xiao Ya INT8 entry.
 - Handoff pre-commit recheck: targeted Release 6/6 (excluding the already verified long-running P4 synthesis suite), Core 4/4 and preparation 8/8. Logs: `logs/research-handoff-{release,core,preparation}-tests.log`. This does not rerun the full speaker inventory or establish pronunciation parity. The MOSS blocked test verifies rejection, not working synthesis.
 - Previous EN/ZH acceptance covered 20 baseline, 20 memory and 20 separate-process disk requests per language. Hits made zero engine calls and retained identical PCM. Another 120 real WASAPI loopback recordings passed head/tail correlation. This is not playback/listening evidence for all newly configured voices.
 - The previous isolated review EXE ran from an external working directory: original workbook, mapping, playback/cache, manual result, compare and both exports. Native and OOXML readback passed. Status overlap, stale idle status and clipped metric headers discovered during GUI acceptance were fixed and rechecked.
 - Pending user verification: human listening; the full cold/warm playback/control/close and live clear matrix; rapid file/sheet/header changes; multi-language edit/range/cursor combinations; close/cancel/reopen during background work. Automated portions of these composite cases are documented separately, not promoted to full PASS.
 - Arabic/Spanish resource blockers are resolved by preparing the already downloaded weights; no voice substitution or bulk redownload was performed. New language listening/business acceptance and actual ASR accuracy remain NOT_RUN where recognizer output or human assessment has not been supplied.
 - Evidence limitation: original workbook preflight hash and isolated review/model/junction protections passed, but no full pre-task hash inventory of all established production/backup files was recorded. This cannot be reconstructed retrospectively.
-- The earlier work-package source commit/push is complete. The current handoff explicitly requests another source commit/push. The desktop executable is rebuilt; EXE-only replacement of the established runtime still awaits explicit user approval. No runtime replacement, release ZIP or packaging is part of this handoff; no user-owned running review process was stopped.
+- The previous source handoff was committed/pushed as `5b7bee0`. The latest request authorizes the R2 source commit/push, but not established runtime replacement. Baseline/final builds and application directories are isolated outside the repository. No user-owned running review process is stopped. Active desktop input interrupted E1 GUI automation; its unsaved isolated session remains open rather than being discarded.
