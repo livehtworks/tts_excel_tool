@@ -43,7 +43,10 @@ Current phase: R2 safety/interaction/cache source handoff with incomplete compos
   export-then-close. Production-reader and independent XML readback match the
   complete 47x8 edited snapshot and source identities. SAFE02-A/D now pass;
   export-failure leave protection remains unverified. Both F9 and F10 closed
-  normally. Current assertions: 33 PASS / 25 NOT_RUN, not R2 PASS.
+  normally. F11 additionally verifies actual GUI save/close/restart for all four
+  comparison presets, with identical config bytes and restored controls. With
+  earlier custom/reports/folding evidence, UI06-A/B/C all pass. Current assertions:
+  34 PASS / 24 NOT_RUN, not R2 PASS.
   Latest rebuilt program: external `native/app-f10-full/AdayoCorpusTool.exe`;
   targeted Release passes 6/6 in 8.84 seconds and Core 4/4 in 4.90 seconds.
   Protected-file recheck matches all 758 scoped records. No established runtime

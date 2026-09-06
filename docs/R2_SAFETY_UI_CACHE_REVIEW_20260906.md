@@ -49,7 +49,7 @@ Implementation and verification are independent. No overall PASS is claimed.
 | UI-03 mapping layout/navigation | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
 | UI-04 compare group draft boundary | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
 | UI-05 report group/diff details | IMPLEMENTED | PASS |
-| UI-06 compare option commit/layout | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
+| UI-06 compare option commit/layout | IMPLEMENTED | PASS |
 | QA-01 controlled shutdown | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
 | QA-02 evidence/regression | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
 
@@ -61,6 +61,14 @@ statuses are not upgraded by R2 tests. Historical ENV-02 evidence remains missin
 
 These are subcase results, not full-item or overall acceptance:
 
+- F11 closes UI06-A: Strict, CER, WER and Legacy are each selected in the real
+  F10 GUI, saved, normally closed and relaunched. All config bytes remain equal
+  across each restart; the comparison page restores the metric, pairing,
+  thresholds and applicable disabled controls. The final empty window also
+  closes normally. This completes the earlier strict/CER custom restarts,
+  four-metric report readbacks and folding checks. Evidence:
+  `native/ui-f11/preset-restart-observations.json` and
+  `native/ui-f11/preset-{set,restart}-*.jpg`. UI06-A/B/C now all pass.
 - F11 observes the existing F10 executable without changing production code.
   SAFE02-A passes: reference F2 receives the copied multiline cache diagnostics
   while preserving the original four-line suffix, English G2 gains the prefix
@@ -158,7 +166,7 @@ These are subcase results, not full-item or overall acceptance:
   failed log is retained, and corrected expected status coverage passes.
   Evidence: `native/ui-f5/{config-f8-witness.json,readback-f8-v2.log}` and
   `native/ui-f1/f8-*-0.jpg`. Strict-custom and CER-custom process restarts pass;
-  remaining preset GUI restart combinations keep UI06-A unverified.
+  F11 completes the four default-preset GUI restarts described above.
 - F8 desktop build and targeted Release pass 6/6 in 11.41 seconds, following
   the full F5 native suite. Latest isolated EXE SHA256:
   `bf67842297aead27b38e7ae625838e03d2cc688e5ab61599ad08c5c2785f435a`.
@@ -313,7 +321,7 @@ workbook (`protection-after-f11.log`). Historical whole-backup evidence is not i
 Remaining full-item evidence includes full GUI/DPI/device/lifecycle and composite
 cache matrices. `acceptance_results.json` in the private evidence root records
 individual work-package assertions separately from the partial native/GUI results.
-The reconciled assertion snapshot is 33 PASS / 25 NOT_RUN. Each NOT_RUN now names
+The reconciled assertion snapshot is 34 PASS / 24 NOT_RUN. Each NOT_RUN now names
 its specific missing combination or unresolved measurement; it is not a generic
 claim that source work or tools are blocked. NOT_RUN denotes an
 unproven complete assertion, even where individual subcases have passed. E5
