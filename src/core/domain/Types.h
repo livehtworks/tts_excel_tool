@@ -215,6 +215,7 @@ struct TtsModelConfig {
     std::string language_code;
     std::int32_t speaker_id{0};
     std::int32_t num_threads{2};
+    std::string text_normalization{"none"};
 };
 
 struct TtsRequest {

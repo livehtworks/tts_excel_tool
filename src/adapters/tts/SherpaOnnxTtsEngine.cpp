@@ -1,6 +1,7 @@
 #include "adapters/tts/SherpaOnnxTtsEngine.h"
 
 #include "platform/UnicodePath.h"
+#include "core/unicode/Utf8.h"
 
 #include <algorithm>
 #include <cmath>
@@ -54,6 +55,8 @@ bool SherpaOnnxTtsEngine::IsLoaded() const noexcept {
 }
 
 void SherpaOnnxTtsEngine::Load(const TtsModelConfig& config) {
+    if (config.text_normalization != "none" && config.text_normalization != "nfd")
+        throw std::invalid_argument("Unsupported TTS text normalization");
     Unload();
     impl_->config = config;
 #ifdef ADAYO_HAS_SHERPA_ONNX
@@ -107,8 +110,9 @@ AudioBuffer SherpaOnnxTtsEngine::Synthesize(const TtsRequest& request) {
     generation.speed = static_cast<float>(std::clamp(request.speed, 0.5, 2.0));
 
     using AudioPtr = std::unique_ptr<const SherpaOnnxGeneratedAudio, decltype(&SherpaOnnxDestroyOfflineTtsGeneratedAudio)>;
+    const auto text = impl_->config.text_normalization == "nfd" ? unicode::NormalizeNfd(request.text) : request.text;
     const SherpaOnnxGeneratedAudio* raw_audio = SherpaOnnxOfflineTtsGenerateWithConfig(
-        impl_->tts, request.text.c_str(), &generation, nullptr, nullptr);
+        impl_->tts, text.c_str(), &generation, nullptr, nullptr);
     AudioPtr audio(raw_audio, SherpaOnnxDestroyOfflineTtsGeneratedAudio);
     if (!audio) throw std::runtime_error("sherpa-onnx TTS 生成失败");
     if (audio->sample_rate <= 0 || audio->n <= 0 || audio->samples == nullptr) {

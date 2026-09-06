@@ -37,7 +37,7 @@ std::string TtsService::ModelIdentity(const TtsModelConfig& config, bool require
     if (!engine_ || engine_->Id()!=config.engine_id) throw std::runtime_error("ENGINE_MISMATCH");
     std::string configuration;
     for (const auto& value : {config.engine_id,engine_->RuntimeIdentity(),config.model_path,config.tokens_path,
-        config.data_dir,config.lexicon_path,config.rule_fsts,config.language_code,std::to_string(config.speaker_id),std::to_string(config.num_threads)})
+        config.data_dir,config.lexicon_path,config.rule_fsts,config.language_code,std::to_string(config.speaker_id),std::to_string(config.num_threads),config.text_normalization})
         Field(configuration,value);
     if (require_assets && (config.model_path.empty() || config.tokens_path.empty() || config.language_code.empty() || config.speaker_id<0 || config.num_threads<1))
         throw std::runtime_error("MODEL_INVALID: incomplete model context");

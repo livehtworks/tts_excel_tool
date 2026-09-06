@@ -1,6 +1,8 @@
 #include "core/unicode/Utf8.h"
 
 #include <array>
+#include <cstdlib>
+#include <memory>
 #include <stdexcept>
 
 #ifdef ADAYO_HAS_UTF8PROC
@@ -8,6 +10,22 @@
 #endif
 
 namespace adayo::unicode {
+std::string NormalizeNfd(std::string_view text) {
+    DecodeStrict(text);
+#ifdef ADAYO_HAS_UTF8PROC
+    utf8proc_uint8_t* mapped = nullptr;
+    const auto size = utf8proc_map(reinterpret_cast<const utf8proc_uint8_t*>(text.data()),
+        static_cast<utf8proc_ssize_t>(text.size()), &mapped,
+        static_cast<utf8proc_option_t>(UTF8PROC_STABLE | UTF8PROC_DECOMPOSE));
+    std::unique_ptr<utf8proc_uint8_t, decltype(&std::free)> owned(mapped, &std::free);
+    if (size < 0) throw std::runtime_error("Unicode NFD normalization failed");
+    if (size == 0) return {};
+    return {reinterpret_cast<const char*>(mapped), static_cast<std::size_t>(size)};
+#else
+    throw std::runtime_error("UNSUPPORTED_UNICODE: NFD requires utf8proc");
+#endif
+}
+
 namespace {
 constexpr char32_t kReplacement = 0xFFFD;
 

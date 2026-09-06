@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <numeric>
@@ -253,7 +254,59 @@ void VerifyLoopback(const AudioBuffer& audio,const std::vector<float>& captured,
 }
 #endif
 
-int main(int argc, char** argv) {
+static int RunMain(int argc, char** argv) {
+    if (argc == 4 && std::string(argv[1]) == "--registry-probe") {
+        return test::RunTestMain("adayo_downloaded_voice_registry", [&] {
+            const auto scan = ModelRegistry(PathFromUtf8(argv[2])).ScanSherpaModelsWithDiagnostics();
+            std::ifstream input(PathFromUtf8(argv[3]));
+            const auto inventory = nlohmann::json::parse(input);
+            std::size_t expected = 0, models = 0;
+            for (const auto& row : inventory.at("piper")) {
+                const auto id = row.at("id").get<std::string>();
+                if (row.at("status") != "PASS") {
+                    REQUIRE(std::none_of(scan.entries.begin(), scan.entries.end(), [&](const auto& e) { return e.id == id; }));
+                    continue;
+                }
+                const auto& base = FindId(scan.entries, id);
+                const auto count = row.at("num_speakers").get<int>();
+                for (int sid = 0; sid < count; ++sid) {
+                    const auto& entry = FindId(scan.entries, sid == base.config.speaker_id ? id : id + "::speaker-" + std::to_string(sid));
+                    REQUIRE(entry.config.speaker_id == sid);
+                    REQUIRE(entry.config.model_path == base.config.model_path);
+                    REQUIRE(entry.config.language_code == row.at("language_code").get<std::string>());
+                    ++expected;
+                }
+                ++models;
+            }
+            std::cout << "REGISTRY_OK models=" << models << " speakers=" << expected
+                      << " total_entries=" << scan.entries.size() << " diagnostics=" << scan.invalid.size() << '\n';
+            for (const auto& invalid : scan.invalid) std::cout << "DIAGNOSTIC " << invalid.id << ": " << invalid.error << '\n';
+        });
+    }
+    if (argc == 4 && (std::string(argv[1]) == "--voice-probe" || std::string(argv[1]) == "--voice-probe-default")) {
+        return test::RunTestMain("adayo_voice_probe", [&] {
+            const auto model = ModelRegistry::LoadModelJson(PathFromUtf8(argv[2]));
+            std::ifstream input(PathFromUtf8(argv[3]));
+            const auto fixture = nlohmann::json::parse(input);
+            const auto text = fixture.at(model.config.language_code).get<std::string>();
+            TtsService service;
+            service.SetEngine(std::make_unique<SherpaOnnxTtsEngine>());
+            service.EnsureModelLoaded(model.id, model.config);
+            auto speakers = model.speakers;
+            if (std::string(argv[1]) == "--voice-probe-default") speakers.clear();
+            if (speakers.empty()) speakers.emplace_back(model.config.speaker_id, "default");
+            for (const auto& [id, name] : speakers) {
+                const auto audio = service.Synthesize({text, model.config.language_code, id, 1.0});
+                RequireUsableAudio(audio);
+                double energy = 0;
+                for (float value : audio.samples) { REQUIRE(std::isfinite(value)); energy += value * value; }
+                REQUIRE(audio.samples.size() >= static_cast<std::size_t>(audio.sample_rate / 10));
+                REQUIRE(energy / audio.samples.size() > 1e-8);
+                std::cout << "VOICE_OK " << model.id << " speaker=" << id << " rate=" << audio.sample_rate
+                          << " frames=" << audio.samples.size() << " rms=" << std::sqrt(energy / audio.samples.size()) << '\n' << std::flush;
+            }
+        });
+    }
     if(argc==6 && (std::string(argv[1])=="--cache-probe" || std::string(argv[1])=="--audio-probe")) {
         return test::RunTestMain("adayo_p4_real_cache_probe",[&] {
             const auto probe_started=std::chrono::steady_clock::now();
@@ -315,8 +368,24 @@ int main(int argc, char** argv) {
         });
     }
     return test::RunTestMain("adayo_p4_tts_tests", [] {
+        // espeak has process-global initialization: Unicode paths must be first,
+        // otherwise an earlier ASCII path can conceal an encoding failure.
+        TestSherpaUnicodePathGate();
         TestSherpaSmokeAndSwitching();
         TestSherpaRepeatedGeneration();
-        TestSherpaUnicodePathGate();
     });
 }
+
+#ifdef _WIN32
+int wmain(int argc, wchar_t** argv) {
+    std::vector<std::string> arguments;
+    arguments.reserve(argc);
+    for (int i = 0; i < argc; ++i) arguments.push_back(PathToUtf8(std::filesystem::path(argv[i])));
+    std::vector<char*> pointers;
+    for (auto& argument : arguments) pointers.push_back(argument.data());
+    pointers.push_back(nullptr);
+    return RunMain(argc, pointers.data());
+}
+#else
+int main(int argc, char** argv) { return RunMain(argc, argv); }
+#endif

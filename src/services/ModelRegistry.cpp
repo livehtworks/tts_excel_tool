@@ -71,7 +71,7 @@ std::string ResolveList(const std::filesystem::path& root, const std::string& va
 
 void RequireFile(const std::filesystem::path& path, const char* label) {
     if (path.empty()) return;
-    if (!std::filesystem::exists(path)) {
+    if (!std::filesystem::is_regular_file(path)) {
         throw std::runtime_error("模型缺失 " + std::string(label) + ": " + PathString(path));
     }
 }
@@ -126,7 +126,15 @@ ModelRegistryScanResult ModelRegistry::ScanSherpaModelsWithDiagnostics() const {
     });
     for (const auto& model_json : model_files) {
         try {
-            result.entries.push_back(LoadModelJson(model_json));
+            auto entry = LoadModelJson(model_json);
+            result.entries.push_back(entry);
+            for (const auto& [id, name] : entry.speakers) {
+                if (id == entry.config.speaker_id) continue;
+                TtsModelEntry speaker{entry.id + "::speaker-" + std::to_string(id),
+                    entry.display_name + " / " + name, entry.root, entry.config, {}};
+                speaker.config.speaker_id = id;
+                result.entries.push_back(std::move(speaker));
+            }
         } catch (const std::exception& ex) {
             result.invalid.push_back({model_json.parent_path(), PathToUtf8(model_json.parent_path().filename()), ex.what()});
         }
@@ -183,13 +191,39 @@ TtsModelEntry ModelRegistry::LoadModelJson(const std::filesystem::path& model_js
     c.language_code = j.value("language_code", std::string{});
     c.speaker_id = j.value("speaker_id", 0);
     c.num_threads = j.value("num_threads", 2);
+    c.text_normalization = j.value("text_normalization", std::string{"none"});
+    if (c.text_normalization != "none" && c.text_normalization != "nfd")
+        throw std::runtime_error("MODEL_INVALID: unsupported text_normalization: " + entry.id);
     if (c.language_code.empty()) throw std::runtime_error("模型配置缺少 language_code: " + PathToUtf8(model_json));
     if (c.speaker_id < 0) throw std::runtime_error("模型 speaker_id 不能为负数: " + entry.id);
     if (c.num_threads < 1) throw std::runtime_error("模型 num_threads 必须 >= 1: " + entry.id);
+    if (j.contains("speakers") != j.contains("num_speakers"))
+        throw std::runtime_error("MODEL_INVALID: speakers and num_speakers must be supplied together: " + entry.id);
+    if (j.contains("speakers")) {
+        const auto& speakers = j.at("speakers");
+        if (!j.at("num_speakers").is_number_integer() || (j.contains("speaker_id") && !j.at("speaker_id").is_number_integer()))
+            throw std::runtime_error("MODEL_INVALID: speaker count/id must be integers: " + entry.id);
+        const auto count = j.at("num_speakers").get<int>();
+        if (!speakers.is_array() || count < 1 || count > 10000 || speakers.size() != static_cast<std::size_t>(count))
+            throw std::runtime_error("MODEL_INVALID: incomplete speakers: " + entry.id);
+        std::vector<bool> seen(count, false);
+        for (const auto& speaker : speakers) {
+            if (!speaker.at("id").is_number_integer())
+                throw std::runtime_error("MODEL_INVALID: speaker id must be an integer: " + entry.id);
+            const auto id = speaker.at("id").get<int>();
+            const auto name = RequiredString(speaker, "name", model_json);
+            if (id < 0 || id >= count || seen[id])
+                throw std::runtime_error("MODEL_INVALID: duplicate/out-of-range speaker: " + entry.id);
+            seen[id] = true;
+            entry.speakers.emplace_back(id, name);
+        }
+        if (c.speaker_id >= count)
+            throw std::runtime_error("MODEL_INVALID: default speaker out of range: " + entry.id);
+    }
 
     RequireFile(PathFromUtf8(c.model_path), "model");
     RequireFile(PathFromUtf8(c.tokens_path), "tokens");
-    if (!c.data_dir.empty() && !std::filesystem::exists(PathFromUtf8(c.data_dir))) {
+    if (!c.data_dir.empty() && !std::filesystem::is_directory(PathFromUtf8(c.data_dir))) {
         throw std::runtime_error("模型缺失 data_dir: " + c.data_dir);
     }
     RequireFile(PathFromUtf8(c.lexicon_path), "lexicon");

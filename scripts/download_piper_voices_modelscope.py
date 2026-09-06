@@ -1,9 +1,10 @@
 import argparse
+import hashlib
+import json
 import os
 import subprocess
 from pathlib import Path
 
-from modelscope.hub.api import HubApi
 
 
 PIPER_LANGUAGE_ROOTS = """
@@ -13,6 +14,7 @@ ne nl no pl pt ro ru sk sl sq sr sv sw te tr uk ur vi zh
 
 
 def list_piper_voice_files():
+    from modelscope.hub.api import HubApi
     api = HubApi()
     files = {}
     for root in PIPER_LANGUAGE_ROOTS:
@@ -30,8 +32,18 @@ def list_piper_voice_files():
 
 def local_needs_download(local_dir, relative_path, expected_size):
     target = local_dir / Path(relative_path)
+    journal_path = target.with_suffix(target.suffix + ".sherpa-metadata.json")
     if not target.exists():
+        if journal_path.exists():
+            raise RuntimeError(f"Prepared voice missing; inspect its runtime hard links before downloading: {target}")
         return True
+    if journal_path.exists():
+        journal = json.loads(journal_path.read_text(encoding="utf-8"))
+        with target.open("rb") as source:
+            checksum = hashlib.file_digest(source, "sha256").hexdigest()
+        if checksum != journal["prepared_sha256"] or (expected_size > 0 and journal["original_bytes"] != expected_size):
+            raise RuntimeError(f"Prepared voice changed; refusing automatic replacement: {target}")
+        return False
     return expected_size > 0 and target.stat().st_size != expected_size
 
 
@@ -76,9 +88,8 @@ def main():
         if not target.exists():
             bad.append((path, "missing", size))
             continue
-        actual = target.stat().st_size
-        if size > 0 and actual != size:
-            bad.append((path, actual, size))
+        if local_needs_download(local_dir, path, size):
+            bad.append((path, target.stat().st_size, size))
     if bad:
         for item in bad[:20]:
             print(f"BAD {item[0]} actual={item[1]} expected={item[2]}")

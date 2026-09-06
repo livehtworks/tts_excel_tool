@@ -85,6 +85,24 @@ static void TestUnicodePathRoundTrip() {
     REQUIRE(PathFromUtf8(PathToUtf8(path)) == path);
 }
 
+static void TestPiperNfdNormalization() {
+#ifdef ADAYO_HAS_UTF8PROC
+    const auto composed = unicode::Encode(U"\u0439\u0457\u00e9");
+    const auto decomposed = unicode::Encode(U"\u0438\u0306\u0456\u0308e\u0301");
+    REQUIRE(unicode::NormalizeNfd(composed) == decomposed);
+    REQUIRE(unicode::NormalizeNfd(decomposed) == decomposed);
+    REQUIRE(unicode::NormalizeNfd("Upper, Lower!") == "Upper, Lower!");
+    REQUIRE(unicode::NormalizeNfd("").empty());
+#else
+    bool blocked = false;
+    try { unicode::NormalizeNfd("text"); } catch (const std::runtime_error&) { blocked = true; }
+    REQUIRE(blocked);
+#endif
+    bool invalid = false;
+    try { unicode::NormalizeNfd(std::string("a\0b", 3)); } catch (const std::runtime_error&) { invalid = true; }
+    REQUIRE(invalid);
+}
+
 static void TestPlayEditInvalidatesOnlyEditedResult() {
     CorpusViewService service;
     auto session = service.CreateSession(
@@ -183,6 +201,7 @@ int main() {
         TestViewExpansion();
         TestColumnGuess();
         TestUnicodePathRoundTrip();
+        TestPiperNfdNormalization();
         TestPlayEditInvalidatesOnlyEditedResult();
         TestReferenceEditInvalidatesRawRowResultsOnly();
     });

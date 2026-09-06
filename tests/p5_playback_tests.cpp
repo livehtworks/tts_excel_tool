@@ -401,6 +401,11 @@ void TestCacheServiceIdentityAndRestart() {
         REQUIRE(changed.timings.key!=key); REQUIRE(changed.timings.load_call_delta==1);
         config.num_threads=3;
         REQUIRE(rebuilt.Prepare("voice",config,{"hello","en-US",0,1}).timings.load_call_delta==1);
+        const auto before_normalization=rebuilt.Prepare("voice",config,{"hello","en-US",0,1});
+        config.text_normalization="nfd";
+        const auto normalized=rebuilt.Prepare("voice",config,{"hello","en-US",0,1});
+        REQUIRE(normalized.timings.key!=before_normalization.timings.key);
+        REQUIRE(normalized.timings.load_call_delta==1);
         std::filesystem::remove(root/"model.onnx");
         bool missing=false; try{rebuilt.Prepare("voice",config,{"hello","en-US",0,1});}catch(const std::runtime_error&){missing=true;} REQUIRE(missing);
     }

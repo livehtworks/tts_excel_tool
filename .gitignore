@@ -10,6 +10,7 @@ CMakeUserPresets.json
 *.suo
 *.VC.db
 *.obj
+__pycache__/
 /logs/
 /cache/
 /exports/

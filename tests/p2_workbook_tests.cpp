@@ -461,6 +461,39 @@ void TestModelRegistryRejectsDuplicateIdsAndEscapingPaths() {
     std::filesystem::remove_all(root, ec);
 }
 
+void TestModelRegistryExpandsCompleteSpeakers() {
+    const auto root = test::IsolatedRoot() / "speaker_registry";
+    WriteMinimalModel(root / "multi", "multi");
+    const auto path = root / "multi" / "model.json";
+    nlohmann::json config;
+    { std::ifstream input(path); input >> config; }
+    config["speaker_id"] = 1;
+    config["num_speakers"] = 3;
+    config["speakers"] = {{{"id", 0}, {"name", "Zero"}}, {{"id", 1}, {"name", "One"}}, {{"id", 2}, {"name", "Two"}}};
+    const auto save = [&] { std::ofstream(path) << config.dump(); };
+    save();
+    const auto scan = ModelRegistry(root).ScanSherpaModelsWithDiagnostics();
+    REQUIRE(scan.invalid.empty()); REQUIRE(scan.entries.size() == 3);
+    REQUIRE(scan.entries[0].id == "multi"); REQUIRE(scan.entries[0].config.speaker_id == 1);
+    REQUIRE(scan.entries[1].id == "multi::speaker-0"); REQUIRE(scan.entries[1].config.speaker_id == 0);
+    REQUIRE(scan.entries[2].config.speaker_id == 2);
+    REQUIRE(scan.entries[0].config.model_path == scan.entries[2].config.model_path);
+    config["speakers"][2]["id"] = 0; save();
+    REQUIRE(ModelRegistry(root).ScanSherpaModels().empty());
+    config["speakers"][2]["id"] = 2; config["speaker_id"] = 3; save();
+    REQUIRE(ModelRegistry(root).ScanSherpaModels().empty());
+    config["speaker_id"] = 1; config["speakers"].erase(2); save();
+    REQUIRE(ModelRegistry(root).ScanSherpaModels().empty());
+    config["speakers"].push_back({{"id", 2.5}, {"name", "Fraction"}}); save();
+    REQUIRE(ModelRegistry(root).ScanSherpaModels().empty());
+    config.erase("speakers"); save();
+    REQUIRE(ModelRegistry(root).ScanSherpaModels().empty());
+    config.erase("num_speakers"); config["model"]="espeak-ng-data"; save();
+    REQUIRE(ModelRegistry(root).ScanSherpaModels().empty());
+    config["model"]="model.onnx"; config["data_dir"]="tokens.txt"; save();
+    REQUIRE(ModelRegistry(root).ScanSherpaModels().empty());
+}
+
 void TestCorpusViewEditAndResultCycle() {
     OpenXlsxWorkbookReader reader;
     const auto vehicle = reader.ReadSheet(FixturePath(), "Vehicle", 2);
@@ -658,6 +691,7 @@ int main() {
         TestSavedLanguageOverrideSemantics();
         TestModelRegistryKeepsValidModelsWhenOneIsBroken();
         TestModelRegistryRejectsDuplicateIdsAndEscapingPaths();
+        TestModelRegistryExpandsCompleteSpeakers();
         TestCorpusViewEditAndResultCycle();
         TestResultIdentitySurvivesEarlierRowStructureEdit();
         TestSyntheticBlankCannotBeEditedOrMarked();

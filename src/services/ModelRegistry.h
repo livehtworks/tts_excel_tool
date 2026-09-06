@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace adayo {
@@ -13,6 +14,7 @@ struct TtsModelEntry {
     std::string display_name;
     std::filesystem::path root;
     TtsModelConfig config;
+    std::vector<std::pair<int, std::string>> speakers;
 };
 
 struct TtsModelDiagnostic {

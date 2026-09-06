@@ -76,8 +76,20 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
 - MOSS-TTS-Nano ONNX resources currently validated under `dist/AdayoCorpusTool/model/moss`: `MOSS-TTS-Nano-100M-ONNX` and `MOSS-Audio-Tokenizer-Nano-ONNX`, 22 files, 0.710 GiB / 0.763 GB combined.
 - `hf-mirror.com` is usable for small model metadata downloads without the local proxy, but it was too slow for Piper full voice downloads on this workstation.
 - Plain old Piper `.onnx + .json` files are not enough for the current sherpa adapter; converted models also need `tokens.txt` and `espeak-ng-data`.
-- The local huayan x_low Chinese model failed native sherpa generation because Chinese lexicon/FST resources were missing.
+- The historical huayan x_low config used an escaping espeak path and an old converted model without the Piper voice metadata. Preparing its already downloaded original with current upstream metadata and contained espeak data passes native synthesis; it is an espeak voice, not a g2pW voice requiring Xiao Ya's lexicon.
 - The accepted Chinese P4 model is official `vits-piper-zh_CN-xiao_ya-medium-int8`, downloaded without process proxy variables.
+
+## Voice Preparation
+
+- Piper JSON phoneme maps contain distinct uppercase/lowercase keys. PowerShell must use `ConvertFrom-Json -AsHashtable`; ordinary object conversion fails on `X`/`x`. Stop on parsing errors before counting resources.
+- Count model/quality variants, named voice datasets, base languages, locales and speaker slots separately. Speaker slots across qualities/corpora are not a deduplicated human-voice count.
+- Build target names are `adayo_p2_tests` and `adayo_p4_tts_tests`, not the source filenames. Native voice probes use the production adapter without initializing an audio cache and write diagnostics only to per-run disposable roots.
+- `python` currently resolves to CPython 3.14; ONNX 1.22.0 was installed from the Tsinghua PyPI mirror for development-only asset preparation. Production remains C++.
+- Newer Piper phoneme maps may contain unused multi-codepoint vowel IDs. Upstream espeak emits NFD codepoints unless `vowel_clusters` is configured. Only those unreachable entries may be omitted from sherpa's character token table; configured clusters and multi-ID mappings must fail explicitly, not be truncated or guessed. Pinyin syllable tokens must remain intact.
+- `hebrew` requires Nakdimon/G2P and `japanese` requires OpenJTalk/pitch processing. These are not ordinary espeak voices and must not be labeled as such to pass a loader check. Piper `text` uses explicit NFD normalization (existing utf8proc) plus Sherpa's character frontend and original BOS/PAD/EOS IDs; it must not route through espeak.
+- Resource preparation publishes only after candidate synthesis and deployed-path synthesis succeed. Retain metadata journals and prior config snapshots. Weight/data hard links avoid duplicate physical resource sets and preserve the existing voice-root containment contract.
+- Native CLI probes must use `wmain` and explicit wide-to-UTF-8 conversion on Windows; narrow `main` arguments lose characters such as the Portuguese voice name's accent under a Chinese system code page.
+- espeak initializes process-global data once. A Unicode-path test run after an ASCII model may appear to pass while using the old data directory. The P4 gate now initializes a Unicode root first. Both desktop and native probe embed `activeCodePage=UTF-8` so narrow third-party file I/O uses UTF-8 (Windows 10 1903 or newer); the Portuguese deployed-path probe also runs in a fresh process.
 
 ## MOSS-TTS-Nano
 
