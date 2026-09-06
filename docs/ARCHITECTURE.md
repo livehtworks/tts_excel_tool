@@ -95,8 +95,8 @@ Worker 完成后用 wxThreadEvent / CallAfter 回 UI。
 `TtsService -> ITtsEngine` 是唯一稳定边界。
 
 - 请求音频时先验证完整 voice/config/asset 身份；缓存命中不加载模型、不合成；
-- 同一 voice 连续合成默认复用 engine；
-- 切换 voice 时显式 unload/load；
+- 同一模型加载身份的请求复用 engine，包括同模型不同 speaker ID；speaker ID 仍参与音频缓存身份；
+- 模型资源、前端或加载参数导致加载身份改变时显式 unload/load；单纯切换 speaker ID 不重载；
 - UI 只构造播放请求，不在 wx 事件处理函数里加载或卸载 TTS 模型；
 - 原生加载返回后重新检查取消，再决定是否合成；原生合成返回后取消的请求不播放、不回填缓存；
 - 任何 backend 错误直接显示，不做隐藏 fallback；
@@ -127,12 +127,20 @@ Core 永远只接收 `WorksheetData` / `RuntimeView` / `CompareRow`。
 新链要求：
 
 - 一次进程启动；
-- TTS 模型常驻到切换 voice；
+- TTS 模型常驻到加载身份改变或 Runtime 关闭；
 - 直接从 TTS 得到 float PCM buffer；
 - PCM 直接交 AudioPlayer；
 - 启用音频缓存时将有效 PCM 持久化到受管 cache/tts-v1；不是播放临时文件，播放仍直接消费 PCM；
 - Excel 分析不得无条件复制整个 workbook 多份；
 - 1000 条文本对齐必须在普通 CPU 可用范围，最终用 benchmark 固定门槛。
+
+## 8. 比较界面投影
+
+- CompareService 的不可变报告是网格、行详情和导出的共同来源；查看结果组不修改执行输入或报告集合。
+- 行详情使用已有 fragments、度量、状态、S/D/I/N 与来源信息，不重新计算差异。来源编号是导入记录序号，不是物理文件行号；legacy 导入保留原有跳过空记录行为。
+- Indel 的编辑统计显示 N/A；归一化判定 OK 不会隐藏原文差异。CER/WER 保留大于 100% 的错误率及 N=0 未定义状态。
+- 严格逐行模式禁用但保留归一化选项；严格顺序模式仅将其用于找对应，最终仍按原文判等。
+- 参数文本仅验证并更新草稿，失焦或开始时通过 Runtime 串行保存入口提交；路径与组名键入不写配置。高级区折叠只改变布局。
 - CompareExecutionContext 统一约束 512MiB 算法分配峰值；多组报告、评分矩阵、DP/trace、原文/归一化和字符差异均计入。每次对比独立取消，不停止整个 BackgroundJobWorker。
 
 工作簿来源和持久化所有权见 `DATA_FACTS.md`；当前实现与验收状态见 `PROJECT_STATUS.md`，历史审核记录不是当前验收结论。

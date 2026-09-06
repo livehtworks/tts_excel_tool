@@ -179,12 +179,16 @@ ComparePanel::ComparePanel(wxWindow* parent, ApplicationRuntime& runtime)
     result_grid_->EnableEditing(false);
     result_grid_->Bind(wxEVT_GRID_SELECT_CELL,[this](wxGridEvent& event) { ShowDiffDetails(event.GetRow()); event.Skip(); });
     root->Add(result_grid_, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+    row_summary_=new wxStaticText(this,wxID_ANY,wxString{},wxDefaultPosition,wxDefaultSize,wxST_ELLIPSIZE_END|wxST_NO_AUTORESIZE);
+    row_summary_->SetMinSize(wxSize(0,GetCharHeight()));
+    root->Add(row_summary_,0,wxEXPAND|wxLEFT|wxRIGHT|wxBOTTOM,8);
     auto* details=new wxBoxSizer(wxHORIZONTAL);
     auto detail=[&](const char* label,wxStaticText*& title,wxRichTextCtrl*& text) {
         auto* box=new wxBoxSizer(wxVERTICAL);
-        title=new wxStaticText(this,wxID_ANY,WxUtf8(label));
-        text=new wxRichTextCtrl(this,wxID_ANY,wxString{},wxDefaultPosition,FromDIP(wxSize(-1,145)),wxRE_MULTILINE|wxRE_READONLY);
-        box->Add(title,0,wxBOTTOM,4); box->Add(text,1,wxEXPAND);
+        title=new wxStaticText(this,wxID_ANY,WxUtf8(label),wxDefaultPosition,wxDefaultSize,wxST_ELLIPSIZE_END|wxST_NO_AUTORESIZE);
+        title->SetMinSize(wxSize(0,GetCharHeight()));
+        text=new wxRichTextCtrl(this,wxID_ANY,wxString{},wxDefaultPosition,FromDIP(wxSize(-1,125)),wxRE_MULTILINE|wxRE_READONLY);
+        box->Add(title,0,wxEXPAND|wxBOTTOM,4); box->Add(text,1,wxEXPAND);
         details->Add(box,1,wxEXPAND|wxRIGHT,6);
     };
     detail("正式原文",reference_detail_label_,reference_detail_);
@@ -199,6 +203,8 @@ ComparePanel::ComparePanel(wxWindow* parent, ApplicationRuntime& runtime)
 
 void ComparePanel::LayoutOptions() {
     if (!GetSizer()) return;
+    option_summary_->SetLabel(option_summary_text_);
+    option_summary_->Wrap(std::max(1,GetClientSize().GetWidth()-FromDIP(24)));
     Layout();
     if (advanced_->IsExpanded()) {
         // Wrapping needs the actual pane width before its cached best height is valid.
@@ -246,14 +252,18 @@ void ComparePanel::ObserveOptions() {
     if(applying_options_ || closing_) return;
     try {
         const auto options=CurrentOptions(); CompareService::ValidateOptions(options);
-        const bool changed=!options_valid_ || !observed_options_ || options!=*observed_options_;
+        const bool recovered=!options_valid_;
+        const bool changed=recovered || !observed_options_ || options!=*observed_options_;
         observed_options_=options; options_valid_=true;
         if(changed) MarkInputChanged();
         RefreshOptionState();
+        if(recovered && status_) SetStatus(WxUtf8("参数有效"));
     } catch(const std::exception& ex) {
         if(options_valid_) MarkInputChanged();
         options_valid_=false;
-        option_summary_->SetLabel(WxUtf8("参数无效："+std::string(ex.what())));
+        option_summary_text_=WxUtf8("参数无效："+std::string(ex.what()));
+        option_summary_->SetLabel(option_summary_text_);
+        LayoutOptions();
         if(compare_button_) compare_button_->Disable();
         if(status_) SetStatus(WxUtf8(ex.what()));
     }
@@ -583,6 +593,9 @@ void ComparePanel::RefreshOptionState() {
     const auto options=CurrentOptions();
     for(auto* control:option_controls_) control->Enable(!busy_);
     const bool sequence=options.pairing==CompareAlignment::Sequence;
+    const bool normalizer_used=options.metric!=CompareMetric::Exact || sequence;
+    normalization_->Enable(!busy_ && normalizer_used);
+    for(auto* control:{case_fold_,ignore_punctuation_,collapse_whitespace_,trim_}) control->Enable(!busy_ && normalizer_used);
     for(auto* control:{align_threshold_,anchor_threshold_,anchor_margin_,gap_penalty_}) control->Enable(!busy_ && sequence);
     pass_threshold_->Enable(!busy_ && options.metric==CompareMetric::Indel);
     max_error_->Enable(!busy_ && (options.metric==CompareMetric::Cer || options.metric==CompareMetric::Wer));
@@ -591,11 +604,12 @@ void ComparePanel::RefreshOptionState() {
     summary+=" | "+CompareService::ValueLabel(options.metric);
     if(sequence && (options.metric==CompareMetric::Cer || options.metric==CompareMetric::Wer)) summary+=" | 自动句对齐后 CER/WER";
     if(options.metric==CompareMetric::Indel) summary+=" | 判定：归一化相似度";
-    if(options.metric==CompareMetric::Exact) summary+=" | 判定：原文完全一致";
-    option_summary_->SetLabel(WxUtf8(summary));
-    option_summary_->Wrap(std::max(300,GetClientSize().GetWidth()-24));
+    if(options.metric==CompareMetric::Exact) summary+=sequence ?
+        " | 归一化仅用于找对应，最终仍比较原文" : " | 判定：原文完全一致；归一化不参与";
+    option_summary_text_=WxUtf8(summary);
+    option_summary_->SetLabel(option_summary_text_);
     if(compare_button_) compare_button_->Enable(!busy_ && options_valid_ && (input_groups_.empty() || !draft_dirty_));
-    Layout();
+    LayoutOptions();
 }
 
 std::string ComparePanel::CurrentDelimiter() const {
@@ -655,8 +669,10 @@ void ComparePanel::RefreshGrid() {
             }
         }
         const auto& t=report.totals;
-        auto summary="OK "+std::to_string(ok)+" / NG "+std::to_string(ng)+" / MISSING "+std::to_string(missing)+" / EXTRA "+std::to_string(extra);
-        summary+=" | S/D/I/N "+std::to_string(t.substitutions)+"/"+std::to_string(t.deletions)+"/"+std::to_string(t.insertions)+"/"+std::to_string(t.reference_units);
+        auto summary="记录 "+std::to_string(report.rows.size())+" | OK "+std::to_string(ok)+" / NG "+std::to_string(ng)+" / MISSING "+std::to_string(missing)+" / EXTRA "+std::to_string(extra);
+        summary+=" | S/D/I/N ";
+        summary+=report.options.metric==CompareMetric::Indel ? "N/A" :
+            std::to_string(t.substitutions)+"/"+std::to_string(t.deletions)+"/"+std::to_string(t.insertions)+"/"+std::to_string(t.reference_units);
         if(report.options.metric==CompareMetric::Cer || report.options.metric==CompareMetric::Wer) {
             const auto rate=t.ErrorRate();
             summary+=" | "+CompareService::ValueLabel(report.options.metric)+": "+(rate ? Utf8FromWx(wxString::Format("%.2f%%",*rate*100)) : std::string("N=0，未定义"));
@@ -669,9 +685,27 @@ void ComparePanel::RefreshGrid() {
 void ComparePanel::ShowDiffDetails(int row) {
     if(!reference_detail_ || !actual_detail_) return;
     reference_detail_->Clear(); actual_detail_->Clear();
+    row_summary_->SetLabel({}); row_summary_->UnsetToolTip();
     reference_detail_label_->SetLabel(WxUtf8("正式原文")); actual_detail_label_->SetLabel(WxUtf8("机器原文"));
+    reference_detail_label_->UnsetToolTip(); actual_detail_label_->UnsetToolTip();
     if(report_groups_->empty() || row<0 || static_cast<std::size_t>(row)>=report_groups_->at(result_table_->CurrentGroup()).rows.size()) return;
-    const auto& item=report_groups_->at(result_table_->CurrentGroup()).rows.at(row);
+    const auto& report=report_groups_->at(result_table_->CurrentGroup());
+    const auto& item=report.rows.at(row);
+    auto summary=WxUtf8(CompareService::ValueLabel(item.metric))+": "+result_table_->GetValue(row,2)+" | "+result_table_->GetValue(row,3)+" | S/D/I/N ";
+    if(item.metric==CompareMetric::Indel) summary+="N/A";
+    else summary+=WxUtf8(std::to_string(item.edits.substitutions)+"/"+std::to_string(item.edits.deletions)+"/"+
+        std::to_string(item.edits.insertions)+"/"+std::to_string(item.edits.reference_units));
+    if(item.metric==CompareMetric::Indel && item.status==CompareStatus::Ok && item.reference_text!=item.actual_text)
+        summary+=WxUtf8(" | 归一化判定通过，红字仍表示原文差异");
+    row_summary_->SetLabel(summary); row_summary_->SetToolTip(summary);
+    auto source_label=[](wxStaticText* label,const char* side,const std::optional<std::size_t>& index,const TextInputSource& source) {
+        if(!index) return;
+        const auto title=std::string(side)+" #"+std::to_string(*index+1)+" | "+PathToUtf8(PathFromUtf8(source.path).filename());
+        label->SetLabel(WxUtf8(title));
+        label->SetToolTip(WxUtf8(title+"\n"+source.path+"\nSHA256: "+source.sha256));
+    };
+    source_label(reference_detail_label_,"正式记录",item.reference_index,report.reference_source);
+    source_label(actual_detail_label_,"机器记录",item.actual_index,report.actual_source);
     auto render=[](wxRichTextCtrl* control,const std::string& raw,const std::vector<DiffFragment>& fragments) {
         std::string reconstructed;
         for(const auto& fragment:fragments) reconstructed+=fragment.text;

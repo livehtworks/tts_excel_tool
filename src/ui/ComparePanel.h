@@ -89,6 +89,7 @@ private:
     wxSpinCtrlDouble* gap_penalty_{};
     wxTextCtrl* max_error_{};
     wxStaticText* option_summary_{};
+    wxString option_summary_text_;
     std::vector<wxWindow*> option_controls_;
     bool applying_options_{false};
     bool comparing_{false};
@@ -102,6 +103,7 @@ private:
     wxCollapsiblePane* advanced_{};
     wxChoice* result_group_{};
     wxStaticText* result_summary_{};
+    wxStaticText* row_summary_{};
     wxRichTextCtrl* reference_detail_{};
     wxRichTextCtrl* actual_detail_{};
     wxStaticText* reference_detail_label_{};

@@ -6,7 +6,8 @@ and remote main at preflight; initial worktree clean. The latest user request
 authorizes source commit/push. Canonical resource updates, production executable
 replacement and ZIP remain excluded.
 Initial R2 implementation commit: `5b6aeea`; native cancellation and destruction
-tracing continued in `303abbb`. Git history is the authority for subsequent
+tracing continued in `303abbb`; native identity/performance coverage is in
+`0e3c1e8`. Git history is the authority for subsequent
 staged fixes and the final handoff SHA.
 
 ## Current Stage
@@ -47,7 +48,7 @@ Implementation and verification are independent. No overall PASS is claimed.
 | UI-02 playback/edit/cache interaction | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
 | UI-03 mapping layout/navigation | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
 | UI-04 compare group draft boundary | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
-| UI-05 report group/diff details | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
+| UI-05 report group/diff details | IMPLEMENTED | PASS |
 | UI-06 compare option commit/layout | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
 | QA-01 controlled shutdown | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
 | QA-02 evidence/regression | IMPLEMENTED_NOT_VERIFIED | NOT_RUN |
@@ -59,6 +60,43 @@ statuses are not upgraded by R2 tests. Historical ENV-02 evidence remains missin
 ## Current Evidence
 
 These are subcase results, not full-item or overall acceptance:
+
+- F8 comparison GUI and OOXML readback close UI04-A/C, UI05-A/B/C and
+  UI06-B/C. F1 two-group exports retain both groups and all three sheets when
+  viewing group two. An unapplied path edit disables Start; Apply invalidates
+  the old export and subsequent readback changes only that group's source.
+  Navigation leaves configuration bytes and the report unchanged. Logs:
+  `native/ui-f1/{original-readback,applied-readback-v2}.log`.
+- F6/F7 add row metric/status/S/D/I/N, imported record number and source
+  filename/path/hash. Indel row and group edit statistics are N/A, matching
+  export, and normalized OK retains raw red differences. P6 checks both
+  fragment reconstructions for every supplied strict/metric fixture. Actual GUI
+  covers combining accents, Arabic, emoji and wrapped long text; rich-detail
+  copy/paste yields plain emoji/Chinese, not markup. Legacy record numbers are
+  positions after its existing skip-empty import, not physical file lines.
+  No import, alignment, normalization or scoring algorithm changed.
+  Four-metric export checks: `native/ui-f5/readback-v3.log`; screenshots:
+  `native/ui-f1/{strict-long-detail,strict-rtl-detail,emoji-plain-paste,
+  f7-indel-group-na,f7-indel-raw-diff}-0.jpg`.
+- Strict Rows disables and retains NFC settings; composed/decomposed raw text
+  remains NG. Strict Sequence enables the normalizer only for pairing and says
+  so explicitly. Initial summary wrapping now starts from an unwrapped label at
+  the actual width. F8 also fixes stale error status after invalid-to-valid
+  recovery. Actual `nan` input prevents Start and retains config bytes; 175%
+  is saved only on blur as 1.75; focused 200% is captured by Start and exported
+  as 2. Path typing retains config bytes and last-write time. Expanded/collapsed
+  advanced controls preserve report/export validity. F8 export readback checks
+  every cell in all three sheets against the earlier verified CER report,
+  permitting only the specified threshold/custom/status changes. Its initial
+  harness missed the duplicate status column in the statistics sheet; that
+  failed log is retained, and corrected expected status coverage passes.
+  Evidence: `native/ui-f5/{config-f8-witness.json,readback-f8-v2.log}` and
+  `native/ui-f1/f8-*-0.jpg`. Strict-custom and CER-custom process restarts pass;
+  remaining preset GUI restart combinations keep UI06-A unverified.
+- F8 desktop build and targeted Release pass 6/6 in 11.41 seconds, following
+  the full F5 native suite. Latest isolated EXE SHA256:
+  `bf67842297aead27b38e7ae625838e03d2cc688e5ab61599ad08c5c2785f435a`.
+  Logs: `native/stage-f8-{ui-build,targeted-tests}.log`.
 
 - F5 full Release passes 7/7 in 711.48 seconds. Its 699.58-second P4 run includes
   real shared-load/SID, rule/thread reload, pinyin/eSpeak/NFD, cancellation at
@@ -203,14 +241,15 @@ These are subcase results, not full-item or overall acceptance:
   layout. Expanded and re-collapsed screenshots retain a nonzero result grid
   at the same 1898x1219 window size (`native/ui-d7/compare-*.jpg`).
 
-The E4 protected-file after manifest matches all 758 before records (bytes, SHA256
+The F8 protected-file after manifest matches all 758 before records (bytes, SHA256
 and file identity), covering the scoped canonical program/models and original
-workbook (`protection-after-e4.log`). Historical whole-backup evidence is not inferred.
+workbook (`protection-after-f8.log`). Historical whole-backup evidence is not inferred.
 Remaining full-item evidence includes full GUI/DPI/device/lifecycle and composite
 cache matrices. `acceptance_results.json` in the private evidence root records
 individual work-package assertions separately from the partial native/GUI results.
-The last published assertion snapshot is 17 PASS / 41 NOT_RUN; F1/F3 evidence
-above has not yet been reconciled into that external snapshot. NOT_RUN denotes an
+The reconciled assertion snapshot is 29 PASS / 29 NOT_RUN. Each NOT_RUN now names
+its specific missing combination or unresolved measurement; it is not a generic
+claim that source work or tools are blocked. NOT_RUN denotes an
 unproven complete assertion, even where individual subcases have passed. E5
 targeted regression passes 6/6 in 11.72 seconds. Reproduction entry points use
 the external run root (`<run>`) and disposable fixture paths:
@@ -231,7 +270,8 @@ paths are retained in external `build-native.cmd`, `build-core.cmd` and
 snapshot. Do not regenerate the protection-before baseline.
 
 Active desktop input interrupted E1 GUI automation; that session was not discarded
-or forcibly terminated by the agent. F1 continues in a separate isolated program.
+or forcibly terminated by the agent. It was absent when this continuation resumed.
+F1/F5/F6/F7 windows closed normally; F8 is the latest isolated verification process.
 Remaining acceptance
 includes the complete dirty/export-leave flow, actual playback/pause/live-clear
 matrix, full registry and multi-group interaction, DPI, and all long-task close

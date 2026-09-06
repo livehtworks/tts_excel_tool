@@ -173,6 +173,10 @@ $env:VCPKG_FORCE_SYSTEM_BINARIES='1'
   workbook fixture makes P6 fail.
 
 - A shrinking status label needs both a zero minimum width and `wxST_NO_AUTORESIZE | wxST_ELLIPSIZE_END`. `SetLabel` otherwise expands the native control over adjacent buttons even when the sizer has a bounded width.
+- Keep an unwrapped copy of option-summary text and rewrap from it after the real
+  client width is known. Reusing an already wrapped label retains obsolete line
+  breaks after resize. Validation recovery must also replace its stale error
+  status; enabling Start alone is not sufficient GUI recovery.
 - Comparison grid labels use separate group/metric lines and a metric-width column so metric units remain readable. Grid cell overflow is disabled in mapping/runtime/compare views.
 - Track playback state transitions when restoring idle text; continuously overwriting idle status would hide export/error messages, while never updating idle leaves stale Stopping text.
 - Probe first-ready timing starts before model scan and cache initialization. It excludes OS process creation/DLL loader time. WASAPI probe callback timing also includes recording setup and its pre-roll; do not report it as GUI click-to-audible latency.
